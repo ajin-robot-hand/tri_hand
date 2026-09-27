@@ -271,6 +271,14 @@ def test_velocity_mode_reaches_target_velocity(client):
     assert client.get("/state").json()["targets"]["A_j2"] == 0.5
 
 
+def test_velocity_above_angle_range_is_not_capped(client):
+    # 속도 모드 목표가 위치 모드 ctrlrange(±1.5708)로 잘리면 3 rad/s에 못 미침
+    to_velocity(client, "A_j2")
+    client.post("/velocities", json={"A_j2": 3.0})
+    step(0.2)
+    assert server.data.qvel[server.JOINTS["A_j2"].dof] > 2.5
+
+
 def test_velocities_validated_and_clipped(client):
     to_velocity(client, "A_j2")
     assert client.post("/velocities", json={"D_j1": 0.1}).status_code == 400
