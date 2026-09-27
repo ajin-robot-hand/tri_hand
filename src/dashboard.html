@@ -28,6 +28,9 @@
   #msg { margin-top: 8px; min-height: 1.4em; }
   #msg.bad { color: var(--bad); } #msg.ok { color: var(--ok); }
   .note { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  #lines { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+  #lines label { font-weight: 600; white-space: nowrap; }
+  #chart { display: block; width: 100%; height: 260px; margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -52,6 +55,12 @@
 </div>
 
 <section>
+  <label>그래프 <select id="series"></select></label>
+  <span id="lines"></span>
+</section>
+<canvas id="chart"></canvas>
+
+<section>
   <label>프리셋 <select id="preset"><option value="">(선택)</option></select></label>
   <button id="apply" disabled>적용</button>
   <span style="width:16px"></span>
@@ -68,6 +77,14 @@
 const $ = id => document.getElementById(id);
 const FIELDS = ["target", "kp", "kv", "torque_limit"];
 let joints = {}, presets = {}, exclusiveMin = [];
+const SERIES = {
+  angle: { label: "각도", unit: "rad", key: "joints", overlay: "targets" },
+  velocity: { label: "속도", unit: "rad/s", key: "velocities" },
+  torque: { label: "토크", unit: "N·m", key: "forces" },
+};
+const COLORS = ["#e8710a", "#1f77d4", "#2ca02c", "#9b59d0", "#d62f7a", "#12a4b4", "#a88a00"];
+const WINDOW = 10;   // s
+let history = [];
 
 function msg(text, ok) { $("msg").textContent = text; $("msg").className = ok ? "ok" : "bad"; }
 
@@ -130,6 +147,68 @@ function render(s) {
     $(`kv-${n}`).textContent = s.gains[n].kv.toFixed(2);
     $(`tl-${n}`).textContent = s.gains[n].torque_limit.toFixed(2);
   }
+  record(s);
+}
+
+function buildChart() {
+  $("series").replaceChildren(...Object.entries(SERIES).map(([k, sr]) => new Option(sr.label, k)));
+  $("lines").innerHTML = Object.keys(joints).map((n, i) =>
+    `<label style="color:${COLORS[i]}"><input type="checkbox" value="${n}" checked> ${n}</label>`).join("");
+  $("series").onchange = $("lines").onchange = drawChart;
+  new ResizeObserver(drawChart).observe($("chart"));
+}
+
+function record(s) {
+  // /reset 되면 시각이 되돌아가므로 이전 기록은 버림
+  if (history.length && s.time < history.at(-1).t) history = [];
+  history.push({ t: s.time, joints: s.joints, targets: s.targets, velocities: s.velocities, forces: s.forces });
+  while (history[0].t < s.time - WINDOW) history.shift();
+  drawChart();
+}
+
+function drawChart() {
+  const cv = $("chart"), w = cv.clientWidth, h = cv.clientHeight, dpr = devicePixelRatio || 1;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const g = cv.getContext("2d");
+  g.scale(dpr, dpr);
+  const css = getComputedStyle(document.documentElement), color = v => css.getPropertyValue(v).trim();
+  const sr = SERIES[$("series").value];
+  const keys = [sr.key, sr.overlay].filter(Boolean);
+  const on = [...$("lines").querySelectorAll("input:checked")].map(e => e.value);
+  let lo = Infinity, hi = -Infinity;
+  for (const p of history) for (const k of keys) for (const n of on) { lo = Math.min(lo, p[k][n]); hi = Math.max(hi, p[k][n]); }
+  if (lo > hi) { lo = -1; hi = 1; }
+  const pad = (hi - lo) * 0.1 || 0.1;
+  lo -= pad; hi += pad;
+  const t1 = history.length ? history.at(-1).t : WINDOW, t0 = t1 - WINDOW;
+  const L = 76, R = 8, T = 8, B = 22;
+  const x = t => L + (t - t0) / WINDOW * (w - L - R), y = v => T + (hi - v) / (hi - lo) * (h - T - B);
+  g.font = "11px system-ui, sans-serif"; g.lineWidth = 1;
+  g.strokeStyle = color("--line"); g.fillStyle = color("--muted");
+  g.textAlign = "right"; g.textBaseline = "middle";
+  for (let i = 0; i <= 4; i++) {
+    const v = lo + (hi - lo) * i / 4;
+    g.beginPath(); g.moveTo(L, y(v)); g.lineTo(w - R, y(v)); g.stroke();
+    g.fillText(`${(Math.abs(v) < 5e-3 ? 0 : v).toFixed(2)} ${sr.unit}`, L - 4, y(v));
+  }
+  g.textAlign = "center"; g.textBaseline = "top";
+  for (let t = Math.max(0, Math.ceil(t0 / 2) * 2); t <= t1; t += 2) {
+    g.beginPath(); g.moveTo(x(t), T); g.lineTo(x(t), h - B); g.stroke();
+    g.fillText(`${t} s`, x(t), h - B + 4);
+  }
+  g.strokeStyle = color("--fg");
+  g.beginPath(); g.moveTo(L, T); g.lineTo(L, h - B); g.lineTo(w - R, h - B); g.stroke();
+  g.lineWidth = 1.5;
+  Object.keys(joints).forEach((n, i) => {
+    if (!on.includes(n)) return;
+    g.strokeStyle = COLORS[i];
+    for (const k of keys) {
+      g.setLineDash(k === sr.overlay ? [5, 4] : []);
+      g.beginPath();
+      history.forEach((p, j) => g[j ? "lineTo" : "moveTo"](x(p.t), y(p[k][n])));
+      g.stroke();
+    }
+  });
 }
 
 async function refreshPresets(select) {
@@ -182,6 +261,7 @@ $("save").onclick = async () => {
     const [j, l, s] = await Promise.all([api("/joints"), api("/limits"), api("/state")]);
     joints = j; exclusiveMin = l.exclusive_min;
     buildRows(l, s);
+    buildChart();
   } catch (e) { msg(`초기화 실패: ${e.message}`); $("conn").textContent = "끊김"; $("conn").className = "bad"; return; }
   poll();   // 프리셋 목록을 못 읽어도 실시간 상태는 계속 표시
   try { await refreshPresets(); } catch (e) { msg(`프리셋 목록 읽기 실패: ${e.message}`); }
