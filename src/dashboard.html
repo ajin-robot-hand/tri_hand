@@ -5,9 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>tri_hand 대시보드</title>
 <style>
-  :root { --bg: #fff; --fg: #1d1d1f; --muted: #6e6e73; --line: #d2d2d7; --ok: #1a7f37; --bad: #cf222e; --head: #f5f5f7; }
+  :root { --bg: #fff; --fg: #1d1d1f; --muted: #6e6e73; --line: #d2d2d7; --ok: #1a7f37; --bad: #cf222e; --head: #f5f5f7;
+          --accent: #2f6fdb; --off: #c7c7cc; --warn: #bc4c00; }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #161618; --fg: #f5f5f7; --muted: #a1a1a6; --line: #3a3a3c; --ok: #3fb950; --bad: #f85149; --head: #1f1f22; }
+    :root { --bg: #161618; --fg: #f5f5f7; --muted: #a1a1a6; --line: #3a3a3c; --ok: #3fb950; --bad: #f85149; --head: #1f1f22;
+            --accent: #3b6fd8; --off: #48484a; --warn: #f0883e; }
   }
   body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; }
   h1 { font-size: 18px; margin: 0 0 12px; }
@@ -30,7 +32,40 @@
   .note { color: var(--muted); font-size: 12px; margin-top: 8px; }
   #lines { display: flex; flex-wrap: wrap; gap: 4px 12px; }
   #lines label { font-weight: 600; white-space: nowrap; }
-  #chart { display: block; width: 100%; height: 260px; margin-top: 8px; }
+  #chart { display: block; width: 100%; height: 260px; margin: 8px 0 16px; }
+  #cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+  .card { background: var(--head); border: 1px solid var(--line); border-left: 4px solid var(--c); border-radius: 10px; padding: 12px; font-size: 13px; }
+  .card.off { opacity: .85; }
+  .card .hd { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .card .nm { font-weight: 700; font-size: 15px; color: var(--c); }
+  .card .tq { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; }
+  .sw { appearance: none; margin: 0; width: 36px; height: 20px; border-radius: 10px; background: var(--off); position: relative; cursor: pointer; }
+  .sw::after { content: ""; position: absolute; left: 2px; top: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left .15s; }
+  .sw:checked { background: var(--ok); } .sw:checked::after { left: 18px; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; margin-bottom: 4px; }
+  .seg.lk { opacity: .45; }
+  .seg button { flex: 1; border: 0; background: transparent; color: inherit; padding: 4px 0; font-size: 12px; cursor: pointer; }
+  .seg button:disabled { cursor: default; }
+  .seg button.a { background: var(--accent); color: #fff; }
+  .hint { font-size: 11px; color: var(--muted); min-height: 16px; margin-bottom: 8px; }
+  .lbl { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .sl { position: relative; margin: 2px 0 6px; }
+  .sl input { -webkit-appearance: none; appearance: none; display: block; width: 100%; height: 22px; margin: 0; background: transparent; }
+  .sl input::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: var(--line); }
+  .sl input::-moz-range-track { height: 4px; border-radius: 2px; background: var(--line); }
+  .sl input::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; margin-top: -6px; border-radius: 50%; background: var(--c); border: 2px solid #fff; box-sizing: border-box; }
+  .sl input::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: var(--c); border: 2px solid #fff; box-sizing: border-box; }
+  .sl input:disabled::-webkit-slider-thumb { background: var(--off); border-color: var(--muted); }
+  .sl input:disabled::-moz-range-thumb { background: var(--off); border-color: var(--muted); }
+  .sl .pr { position: absolute; top: 5px; width: 3px; height: 12px; margin-left: -1.5px; border-radius: 1px; background: var(--fg); pointer-events: none;
+            left: calc(8px + (100% - 16px) * var(--f, .5)); }
+  .card .in { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
+  .card .in input { flex: 1; min-width: 0; width: auto; padding: 4px 8px; border-radius: 6px; }
+  .card .in input:disabled { color: var(--muted); }
+  .card .in .u { color: var(--muted); font-size: 12px; width: 36px; }
+  .now { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 8px; }
+  .now b { display: block; color: var(--fg); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .now .lim b { color: var(--warn); }
 </style>
 </head>
 <body>
@@ -40,6 +75,14 @@
   <span>시뮬레이션 시각: <b id="time">-</b> s</span>
   <span>접촉 수: <b id="contacts">-</b></span>
 </div>
+
+<div id="cards"></div>
+
+<section>
+  <label>그래프 <select id="series"></select></label>
+  <span id="lines"></span>
+</section>
+<canvas id="chart"></canvas>
 
 <div class="scroll">
 <table>
@@ -53,12 +96,6 @@
   <tbody id="rows"></tbody>
 </table>
 </div>
-
-<section>
-  <label>그래프 <select id="series"></select></label>
-  <span id="lines"></span>
-</section>
-<canvas id="chart"></canvas>
 
 <section>
   <label>프리셋 <select id="preset"><option value="">(선택)</option></select></label>
@@ -78,13 +115,19 @@ const $ = id => document.getElementById(id);
 const FIELDS = ["target", "kp", "kv", "torque_limit"];
 let joints = {}, presets = {}, exclusiveMin = [];
 const SERIES = {
-  angle: { label: "각도", unit: "rad", key: "joints", overlay: "targets" },
-  velocity: { label: "속도", unit: "rad/s", key: "velocities" },
+  angle: { label: "각도", unit: "rad", key: "joints", overlay: "targets", mode: "position" },
+  velocity: { label: "속도", unit: "rad/s", key: "velocities", overlay: "targets", mode: "velocity" },
   torque: { label: "토크", unit: "N·m", key: "forces" },
 };
 const COLORS = ["#e8710a", "#1f77d4", "#2ca02c", "#9b59d0", "#d62f7a", "#12a4b4", "#a88a00"];
 const WINDOW = 10;   // s
 let history = [];
+const MODES = {
+  position: { label: "위치", goal: "목표 각도", unit: "rad", path: "/joints", now: "joints", range: n => joints[n].ctrlrange },
+  velocity: { label: "속도", goal: "목표 속도", unit: "rad/s", path: "/velocities", now: "velocities", range: n => joints[n].velocity_range },
+};
+const editing = new Set();   // 사용자가 목표를 만지는 동안 서버 값으로 덮어쓰지 않음
+let modes = {}, last = null;   // last: 실패한 조작을 되돌려 그릴 마지막 상태
 
 function msg(text, ok) { $("msg").textContent = text; $("msg").className = ok ? "ok" : "bad"; }
 
@@ -147,6 +190,7 @@ function render(s) {
     $(`kv-${n}`).textContent = s.gains[n].kv.toFixed(2);
     $(`tl-${n}`).textContent = s.gains[n].torque_limit.toFixed(2);
   }
+  renderCards(s);
   record(s);
 }
 
@@ -158,10 +202,74 @@ function buildChart() {
   new ResizeObserver(drawChart).observe($("chart"));
 }
 
+function buildCards() {
+  $("cards").innerHTML = Object.keys(joints).map((n, i) => `
+    <div class="card" id="card-${n}" style="--c:${COLORS[i]}">
+      <div class="hd"><span class="nm">${n}</span><label class="tq">토크 <input type="checkbox" class="sw" id="tq-${n}"></label></div>
+      <div class="seg" id="seg-${n}">${Object.entries(MODES).map(([m, md]) => `<button data-mode="${m}">${md.label}</button>`).join("")}</div>
+      <div class="hint" id="hint-${n}"></div>
+      <div class="lbl"><span id="lo-${n}"></span><span id="gl-${n}"></span><span id="hi-${n}"></span></div>
+      <div class="sl"><input type="range" id="sl-${n}" step="any"><div class="pr" id="pr-${n}"></div></div>
+      <div class="in"><input type="number" id="goal-${n}" step="any"><span class="u" id="u-${n}"></span></div>
+      <div class="now"><span>각도<b id="cq-${n}">-</b></span><span>속도<b id="cqd-${n}">-</b></span><span id="cfw-${n}">토크<b id="cf-${n}">-</b></span></div>
+    </div>`).join("");
+  for (const n in joints) {
+    const sl = $(`sl-${n}`), goal = $(`goal-${n}`);
+    $(`tq-${n}`).onchange = e => post(`/joints/${n}/torque`, { enabled: e.target.checked }, "토크 변경 실패");
+    for (const b of $(`seg-${n}`).children) b.onclick = () => post(`/joints/${n}/mode`, { mode: b.dataset.mode }, "모드 변경 실패");
+    sl.oninput = () => { editing.add(n); goal.value = (+sl.value).toFixed(3); };
+    sl.onchange = () => sendGoal(n, +sl.value);
+    goal.oninput = () => editing.add(n);
+    goal.onkeydown = e => { if (e.key === "Enter") sendGoal(n, goal.value === "" ? NaN : +goal.value); };
+    goal.onblur = () => editing.delete(n);
+  }
+}
+
+async function post(path, body, fail) {
+  try {
+    const r = await api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (r.time !== undefined) render(r);
+    return r;
+  } catch (e) { msg(`${fail}: ${e.message}`); if (last) renderCards(last); }
+}
+
+async function sendGoal(n, v) {
+  if (!Number.isFinite(v)) { msg(`${n}: 숫자를 입력하세요`); return; }
+  await post(MODES[modes[n]].path, { [n]: v }, "목표 보내기 실패");
+  editing.delete(n);
+}
+
+function renderCards(s) {
+  for (const n in joints) {
+    const mode = s.modes[n], md = MODES[mode], on = s.torque[n], [lo, hi] = md.range(n);
+    const sl = $(`sl-${n}`), goal = $(`goal-${n}`);
+    $(`card-${n}`).classList.toggle("off", !on);
+    $(`tq-${n}`).checked = on;
+    $(`seg-${n}`).classList.toggle("lk", on);
+    for (const b of $(`seg-${n}`).children) { b.disabled = on; b.classList.toggle("a", b.dataset.mode === mode); }
+    $(`hint-${n}`).textContent = on ? "토크를 끄면 모드를 바꿀 수 있음" : "토크가 꺼져 있음. 목표를 보내려면 토크를 켜세요";
+    if (modes[n] !== mode) {
+      $(`lo-${n}`).textContent = lo.toFixed(3); $(`hi-${n}`).textContent = hi.toFixed(3);
+      $(`gl-${n}`).textContent = md.goal; $(`u-${n}`).textContent = md.unit;
+      sl.min = goal.min = lo; sl.max = goal.max = hi;
+      editing.delete(n);
+    }
+    sl.disabled = goal.disabled = !on;
+    if (!editing.has(n)) { sl.value = s.targets[n]; goal.value = s.targets[n].toFixed(3); }
+    const now = s[md.now][n];
+    $(`pr-${n}`).style.setProperty("--f", Math.min(1, Math.max(0, (now - lo) / (hi - lo))));
+    $(`cq-${n}`).textContent = s.joints[n].toFixed(3);
+    $(`cqd-${n}`).textContent = s.velocities[n].toFixed(3);
+    $(`cf-${n}`).textContent = s.forces[n].toFixed(2);
+    $(`cfw-${n}`).classList.toggle("lim", Math.abs(s.forces[n]) >= s.gains[n].torque_limit - 1e-3);
+  }
+  modes = s.modes; last = s;
+}
+
 function record(s) {
   // /reset 되면 시각이 되돌아가므로 이전 기록은 버림
   if (history.length && s.time < history.at(-1).t) history = [];
-  history.push({ t: s.time, joints: s.joints, targets: s.targets, velocities: s.velocities, forces: s.forces });
+  history.push({ t: s.time, joints: s.joints, targets: s.targets, velocities: s.velocities, forces: s.forces, modes: s.modes });
   while (history[0].t < s.time - WINDOW) history.shift();
   drawChart();
 }
@@ -175,8 +283,10 @@ function drawChart() {
   const sr = SERIES[$("series").value];
   const keys = [sr.key, sr.overlay].filter(Boolean);
   const on = [...$("lines").querySelectorAll("input:checked")].map(e => e.value);
+  const shown = (p, k, n) => k !== sr.overlay || p.modes[n] === sr.mode;   // 목표는 그 모드인 구간만
   let lo = Infinity, hi = -Infinity;
-  for (const p of history) for (const k of keys) for (const n of on) { lo = Math.min(lo, p[k][n]); hi = Math.max(hi, p[k][n]); }
+  for (const p of history) for (const k of keys) for (const n of on)
+    if (shown(p, k, n)) { lo = Math.min(lo, p[k][n]); hi = Math.max(hi, p[k][n]); }
   if (lo > hi) { lo = -1; hi = 1; }
   const pad = (hi - lo) * 0.1 || 0.1;
   lo -= pad; hi += pad;
@@ -205,7 +315,12 @@ function drawChart() {
     for (const k of keys) {
       g.setLineDash(k === sr.overlay ? [5, 4] : []);
       g.beginPath();
-      history.forEach((p, j) => g[j ? "lineTo" : "moveTo"](x(p.t), y(p[k][n])));
+      let pen = false;
+      for (const p of history) {
+        if (!shown(p, k, n)) { pen = false; continue; }
+        g[pen ? "lineTo" : "moveTo"](x(p.t), y(p[k][n]));
+        pen = true;
+      }
       g.stroke();
     }
   });
@@ -261,6 +376,7 @@ $("save").onclick = async () => {
     const [j, l, s] = await Promise.all([api("/joints"), api("/limits"), api("/state")]);
     joints = j; exclusiveMin = l.exclusive_min;
     buildRows(l, s);
+    buildCards();
     buildChart();
   } catch (e) { msg(`초기화 실패: ${e.message}`); $("conn").textContent = "끊김"; $("conn").className = "bad"; return; }
   poll();   // 프리셋 목록을 못 읽어도 실시간 상태는 계속 표시
