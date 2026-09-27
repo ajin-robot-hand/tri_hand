@@ -7,14 +7,20 @@
 
 API (기본 http://127.0.0.1:8000)
   GET  /         대시보드 (웹 브라우저)
-  GET  /state    현재 시뮬레이션 시각, 관절 각도/속도/힘, 목표 각도, 게인(kp/kv/토크 한계), 접촉 수
-  GET  /joints   관절별 ctrlrange, forcerange, close_sign
+  GET  /state    현재 시뮬레이션 시각, 관절 각도/속도/힘, 목표(모드 단위), 게인(kp/kv/토크 한계), 모드, 토크 켜짐, 접촉 수
+  GET  /joints   관절별 ctrlrange, velocity_range, forcerange, close_sign
   GET  /limits   프리셋 kp/kv/torque_limit 허용 범위
   POST /joints   목표 각도 지정 (rad). 일부 관절만 보내도 됨
                  예) curl -X POST localhost:8000/joints \
                        -H 'Content-Type: application/json' -d '{"A_j1": -0.3, "B_j1": 0.3}'
+  POST /velocities  목표 속도 지정 (rad/s). 예) {"A_j2": 0.5}
   POST /grasp    {"amount": 0~1} 로 전 손가락 오므림 정도 지정 (A_j0 제외)
-  POST /reset    시뮬레이션 상태 초기화 (게인은 유지)
+  POST /joints/{name}/torque  {"enabled": bool} 토크 켜기/끄기. 켜는 순간 목표를 현재 상태로 맞춤
+  POST /joints/{name}/mode    {"mode": "position" | "velocity"} 토크가 꺼져 있을 때만 가능 (XL430과 같음)
+  POST /reset    시뮬레이션 상태 초기화 (게인, 모드, 토크 켜짐은 유지)
+
+  목표 각도 요청(/joints, /grasp, 프리셋 적용)은 위치 모드이면서 토크가 켜진 관절만,
+  목표 속도 요청은 속도 모드이면서 토크가 켜진 관절만 받음. 어기면 409이고 아무것도 바꾸지 않음
   GET  /presets              저장된 프리셋 목록
   PUT  /presets/{name}       프리셋 생성/수정 (7개 관절 모두 target, kp, kv, torque_limit). 적용하지 않음
   POST /presets/{name}/apply 저장된 프리셋을 시뮬레이션에 적용
@@ -25,8 +31,10 @@ import math
 import os
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import mujoco
 import numpy as np
@@ -52,6 +60,10 @@ presets_lock = threading.Lock()   # 프리셋 파일 읽기-수정-쓰기 보호
 KP_RANGE = (0.0, 100.0)    # kp > 0
 KV_RANGE = (0.0, 5.0)
 TORQUE_LIMIT_MAX = float(model.actuator_forcerange[:, 1].min())   # XL430 정격 1.4 N·m (hand.xml)
+VEL_LIMIT = 6.36   # rad/s. XL430 기본 Velocity Limit 265 × 0.229 rpm
+# 0.5 rad/s 스텝에서 넘침 없이 도달하는 가장 큰 값 (10 이상은 첫 스텝에서 약 6% 넘침).
+# 관절 damping 0.15 때문에 정상 상태 속도는 목표의 약 97%
+KVEL = 5.0
 
 
 @dataclass(frozen=True)
@@ -81,6 +93,48 @@ def _build_joints() -> dict[str, Joint]:
 
 JOINTS = _build_joints()
 
+ModeName = Literal["position", "velocity"]
+
+
+@dataclass
+class Servo:
+    """관절별 서보 설정의 원본. 토크를 끄면 모델의 kp/kv가 0이 되므로 모델 배열에서 다시 읽을 수 없음"""
+    kp: float
+    kv: float
+    torque_limit: float
+    mode: ModeName = "position"
+    torque: bool = True
+
+
+SERVOS = {n: Servo(kp=float(model.actuator_gainprm[j.act, 0]), kv=float(-model.actuator_biasprm[j.act, 2]),
+                   torque_limit=float(model.actuator_forcerange[j.act, 1]))
+          for n, j in JOINTS.items()}
+
+
+@dataclass(frozen=True)
+class Mode:
+    label: str
+    ctrlrange: Callable[[Joint], tuple[float, float]]
+    prm: Callable[[Servo], tuple[float, float, float]]   # gainprm[0], biasprm[1], biasprm[2]
+    hold: Callable[[Joint], float]                        # 지금 상태를 유지하는 목표
+
+
+MODES: dict[str, Mode] = {
+    "position": Mode("위치", lambda j: j.ctrlrange, lambda s: (s.kp, -s.kp, -s.kv),
+                     lambda j: float(data.qpos[j.qpos])),
+    "velocity": Mode("속도", lambda j: (-VEL_LIMIT, VEL_LIMIT), lambda s: (KVEL, 0.0, -KVEL), lambda j: 0.0),
+}
+
+
+def _write(name: str):
+    """SERVOS[name]을 모델에 반영. position 액추에이터 토크 = gainprm[0]*ctrl + biasprm[1]*q + biasprm[2]*qdot"""
+    j, s = JOINTS[name], SERVOS[name]
+    m = MODES[s.mode]
+    model.actuator_gainprm[j.act, 0], model.actuator_biasprm[j.act, 1], model.actuator_biasprm[j.act, 2] = (
+        m.prm(s) if s.torque else (0.0, 0.0, 0.0))
+    model.actuator_forcerange[j.act] = (-s.torque_limit, s.torque_limit)
+    model.actuator_ctrlrange[j.act] = m.ctrlrange(j)
+
 app = FastAPI(title="tri_hand control")
 
 
@@ -91,13 +145,8 @@ def _validation_error(request, exc):
         {k: v for k, v in e.items() if k in ("loc", "msg", "type")} for e in exc.errors()]})
 
 
-def _gains(j: Joint) -> dict:
-    """position 액추에이터: force = kp*(ctrl - q) - kv*qdot → gainprm[0]=kp, biasprm[1]=-kp, biasprm[2]=-kv"""
-    return {
-        "kp": float(model.actuator_gainprm[j.act, 0]),
-        "kv": float(-model.actuator_biasprm[j.act, 2]),
-        "torque_limit": float(model.actuator_forcerange[j.act, 1]),
-    }
+def _gains(s: Servo) -> dict:
+    return {"kp": s.kp, "kv": s.kv, "torque_limit": s.torque_limit}
 
 
 def _state() -> dict:
@@ -107,18 +156,37 @@ def _state() -> dict:
         "targets": {n: float(data.ctrl[j.act]) for n, j in JOINTS.items()},
         "velocities": {n: float(data.qvel[j.dof]) for n, j in JOINTS.items()},
         "forces": {n: float(data.actuator_force[j.act]) for n, j in JOINTS.items()},
-        "gains": {n: _gains(j) for n, j in JOINTS.items()},
+        "gains": {n: _gains(s) for n, s in SERVOS.items()},
+        "modes": {n: s.mode for n, s in SERVOS.items()},
+        "torque": {n: s.torque for n, s in SERVOS.items()},
         "contacts": data.ncon,
     }
 
 
-def _clip_apply(targets: dict[str, float]) -> dict:
-    """ctrlrange로 잘라서 적용. /joints, /grasp가 공유."""
+def _require(names, mode: ModeName):
+    """대상 관절이 모두 mode이면서 토크가 켜져 있어야 함. lock 안에서 호출해 검사와 적용 사이에 상태가 바뀌지 않게 함"""
+    bad = sorted(n for n in names if not (SERVOS[n].torque and SERVOS[n].mode == mode))
+    if bad:
+        raise HTTPException(409, f"{MODES[mode].label} 모드이면서 토크가 켜진 관절만 목표를 받음: {bad}")
+
+
+def _check_targets(targets: dict[str, float]):
+    unknown = set(targets) - set(JOINTS)
+    if unknown:
+        raise HTTPException(400, f"알 수 없는 관절: {sorted(unknown)}. 사용 가능: {list(JOINTS)}")
+    non_finite = sorted(n for n, q in targets.items() if not math.isfinite(q))
+    if non_finite:
+        raise HTTPException(400, f"유한하지 않은 값: {non_finite}")
+
+
+def _clip_apply(targets: dict[str, float], mode: ModeName) -> dict:
+    """모드 범위로 잘라서 적용. /joints, /velocities, /grasp가 공유."""
     applied, clipped = {}, []
     with lock:
+        _require(targets, mode)
         for name, q in targets.items():
             j = JOINTS[name]
-            lo, hi = j.ctrlrange
+            lo, hi = MODES[mode].ctrlrange(j)
             c = float(np.clip(q, lo, hi))
             if c != q:
                 clipped.append(name)
@@ -135,8 +203,8 @@ def get_state():
 @app.get("/joints")
 def list_joints():
     return {
-        n: {"ctrlrange": list(j.ctrlrange), "forcerange": model.actuator_forcerange[j.act].tolist(),
-            "close_sign": j.close_sign}
+        n: {"ctrlrange": list(j.ctrlrange), "velocity_range": list(MODES["velocity"].ctrlrange(j)),
+            "forcerange": model.actuator_forcerange[j.act].tolist(), "close_sign": j.close_sign}
         for n, j in JOINTS.items()
     }
 
@@ -150,13 +218,14 @@ def limits():
 
 @app.post("/joints")
 def set_joints(targets: dict[str, float]):
-    unknown = set(targets) - set(JOINTS)
-    if unknown:
-        raise HTTPException(400, f"알 수 없는 관절: {sorted(unknown)}. 사용 가능: {list(JOINTS)}")
-    non_finite = sorted(n for n, q in targets.items() if not math.isfinite(q))
-    if non_finite:
-        raise HTTPException(400, f"유한하지 않은 값: {non_finite}")
-    return _clip_apply(targets)
+    _check_targets(targets)
+    return _clip_apply(targets, "position")
+
+
+@app.post("/velocities")
+def set_velocities(targets: dict[str, float]):
+    _check_targets(targets)
+    return _clip_apply(targets, "velocity")
 
 
 class GraspRequest(BaseModel):
@@ -169,13 +238,52 @@ def grasp(req: GraspRequest):
         n: j.close_sign * Q_CLOSE[n.rpartition("_")[2]] * req.amount
         for n, j in JOINTS.items() if j.close_sign is not None
     }
-    return _clip_apply(targets)
+    return _clip_apply(targets, "position")
+
+
+def _joint(name: str) -> Joint:
+    if name not in JOINTS:
+        raise HTTPException(404, f"알 수 없는 관절: {name}. 사용 가능: {list(JOINTS)}")
+    return JOINTS[name]
+
+
+class TorqueRequest(BaseModel):
+    enabled: bool
+
+
+@app.post("/joints/{name}/torque")
+def set_torque(req: TorqueRequest, name: str):
+    j = _joint(name)
+    with lock:
+        s = SERVOS[name]
+        if req.enabled and not s.torque:
+            data.ctrl[j.act] = MODES[s.mode].hold(j)   # 켜는 순간 관절이 튀지 않게
+        s.torque = req.enabled
+        _write(name)
+        return _state()
+
+
+class ModeRequest(BaseModel):
+    mode: ModeName
+
+
+@app.post("/joints/{name}/mode")
+def set_mode(req: ModeRequest, name: str):
+    j = _joint(name)
+    with lock:
+        s = SERVOS[name]
+        if s.torque:
+            raise HTTPException(409, f"{name}: 토크가 켜져 있어 모드를 바꿀 수 없음. 먼저 토크를 끄세요")
+        s.mode = req.mode
+        data.ctrl[j.act] = MODES[s.mode].hold(j)   # 이전 모드 단위의 목표가 새 범위에 남지 않게
+        _write(name)
+        return _state()
 
 
 @app.post("/reset")
 def reset():
     with lock:
-        mujoco.mj_resetData(model, data)   # ctrl도 함께 0으로 초기화됨
+        mujoco.mj_resetData(model, data)   # ctrl도 함께 0으로 초기화됨. 모델 배열(게인, 모드)은 그대로
         mujoco.mj_forward(model, data)
         return _state()
 
@@ -252,13 +360,12 @@ def apply_preset(name: str = PresetName):
     if preset is None:
         raise HTTPException(404, f"프리셋 없음: {name}")
     with lock:
+        _require(preset.root, "position")
         for n, m in preset.root.items():
-            i = JOINTS[n].act
-            model.actuator_gainprm[i, 0] = m.kp
-            model.actuator_biasprm[i, 1] = -m.kp
-            model.actuator_biasprm[i, 2] = -m.kv
-            model.actuator_forcerange[i] = (-m.torque_limit, m.torque_limit)
-            data.ctrl[i] = m.target
+            s = SERVOS[n]
+            s.kp, s.kv, s.torque_limit = m.kp, m.kv, m.torque_limit
+            _write(n)
+            data.ctrl[JOINTS[n].act] = m.target
         return _state()
 
 

@@ -2,6 +2,7 @@
 
   .venv/bin/python -m pytest tests
 """
+import copy
 import json
 import math
 import socket
@@ -33,17 +34,21 @@ def make_preset(**overrides):
 
 def sim_values():
     s = server._state()
-    return {"targets": s["targets"], "gains": s["gains"]}
+    return {k: s[k] for k in ("targets", "gains", "modes", "torque")}
 
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "PRESETS_PATH", tmp_path / "presets.json")
-    saved = [a.copy() for a in (server.model.actuator_gainprm, server.model.actuator_biasprm,
-                                server.model.actuator_forcerange)]
+    arrays = (server.model.actuator_gainprm, server.model.actuator_biasprm, server.model.actuator_forcerange,
+              server.model.actuator_ctrlrange)
+    saved, servos = [a.copy() for a in arrays], copy.deepcopy(server.SERVOS)
     mujoco.mj_resetData(server.model, server.data)
     yield TestClient(server.app)
-    server.model.actuator_gainprm[:], server.model.actuator_biasprm[:], server.model.actuator_forcerange[:] = saved
+    for a, v in zip(arrays, saved):
+        a[:] = v
+    server.SERVOS.clear()
+    server.SERVOS.update(servos)
     mujoco.mj_resetData(server.model, server.data)
 
 
@@ -205,6 +210,126 @@ def test_limits_lower_bounds_match_server_validation(client):
 def test_dashboard_served(client):
     r = client.get("/")
     assert r.status_code == 200 and "tri_hand" in r.text
+
+
+def step(seconds):
+    for _ in range(round(seconds / server.model.opt.timestep)):
+        mujoco.mj_step(server.model, server.data)
+
+
+def to_velocity(client, name):
+    client.post(f"/joints/{name}/torque", json={"enabled": False})
+    client.post(f"/joints/{name}/mode", json={"mode": "velocity"})
+    return client.post(f"/joints/{name}/torque", json={"enabled": True})
+
+
+def test_state_reports_modes_and_torque(client):
+    s = client.get("/state").json()
+    assert s["modes"] == {n: "position" for n in JOINTS}
+    assert s["torque"] == {n: True for n in JOINTS}
+    j = client.get("/joints").json()
+    assert all(j[n]["velocity_range"] == [-server.VEL_LIMIT, server.VEL_LIMIT] for n in JOINTS)
+
+
+def test_mode_change_rejected_while_torque_on(client):
+    r = client.post("/joints/A_j2/mode", json={"mode": "velocity"})
+    assert r.status_code == 409
+    assert client.get("/state").json()["modes"]["A_j2"] == "position"
+
+
+def test_unknown_joint_or_mode_rejected(client):
+    assert client.post("/joints/D_j1/torque", json={"enabled": False}).status_code == 404
+    assert client.post("/joints/D_j1/mode", json={"mode": "velocity"}).status_code == 404
+    client.post("/joints/A_j2/torque", json={"enabled": False})
+    assert client.post("/joints/A_j2/mode", json={"mode": "current"}).status_code == 422
+
+
+def test_torque_off_gives_zero_actuator_force(client):
+    client.post("/joints", json={"A_j1": -1.0})
+    step(0.1)
+    assert abs(server.data.actuator_force[server.JOINTS["A_j1"].act]) > 0.1
+    s = client.post("/joints/A_j1/torque", json={"enabled": False}).json()
+    assert s["torque"]["A_j1"] is False
+    for _ in range(200):
+        mujoco.mj_step(server.model, server.data)
+        assert server.data.actuator_force[server.JOINTS["A_j1"].act] == 0.0
+    # 설정은 토크를 꺼도 남아 있어야 다시 켰을 때 같은 게인으로 돌아옴
+    assert s["gains"]["A_j1"] == {"kp": 12.0, "kv": 0.5, "torque_limit": 1.4}
+
+
+def test_velocity_mode_reaches_target_velocity(client):
+    s = to_velocity(client, "A_j2").json()
+    assert s["modes"]["A_j2"] == "velocity" and s["torque"]["A_j2"] is True
+    r = client.post("/velocities", json={"A_j2": 0.5})
+    assert r.json() == {"applied": {"A_j2": 0.5}, "clipped": []}
+    step(0.5)
+    v = []
+    for _ in range(250):
+        mujoco.mj_step(server.model, server.data)
+        v.append(server.data.qvel[server.JOINTS["A_j2"].dof])
+    assert min(v) == pytest.approx(0.5, abs=0.025) and max(v) == pytest.approx(0.5, abs=0.025)
+    assert client.get("/state").json()["targets"]["A_j2"] == 0.5
+
+
+def test_velocities_validated_and_clipped(client):
+    to_velocity(client, "A_j2")
+    assert client.post("/velocities", json={"D_j1": 0.1}).status_code == 400
+    r = client.post("/velocities", content='{"A_j2": NaN}', headers={"Content-Type": "application/json"})
+    assert r.status_code == 400
+    r = client.post("/velocities", json={"A_j2": 10.0})
+    assert r.json() == {"applied": {"A_j2": server.VEL_LIMIT}, "clipped": ["A_j2"]}
+
+
+@pytest.mark.parametrize("method,path,body", [
+    ("POST", "/joints", {"A_j1": 0.3, "A_j2": 0.3}),
+    ("POST", "/grasp", {"amount": 0.5}),
+    ("POST", "/presets/grip/apply", None),
+])
+def test_angle_request_to_velocity_joint_rejected_without_change(client, method, path, body):
+    client.put("/presets/grip", json=make_preset())
+    to_velocity(client, "A_j2")
+    before = sim_values()
+    r = client.request(method, path, json=body)
+    assert r.status_code == 409 and "A_j2" in r.json()["detail"]
+    assert sim_values() == before
+
+
+def test_velocity_request_to_position_joint_rejected_without_change(client):
+    before = sim_values()
+    r = client.post("/velocities", json={"A_j1": 0.5})
+    assert r.status_code == 409 and "A_j1" in r.json()["detail"]
+    assert sim_values() == before
+
+
+def test_angle_request_to_torque_off_joint_rejected(client):
+    client.post("/joints/B_j1/torque", json={"enabled": False})
+    before = sim_values()
+    r = client.post("/joints", json={"B_j1": 0.3})
+    assert r.status_code == 409 and "B_j1" in r.json()["detail"]
+    assert sim_values() == before
+
+
+def test_torque_on_holds_current_state(client):
+    client.post("/joints", json={"A_j1": -0.8})
+    step(0.5)
+    client.post("/joints/A_j1/torque", json={"enabled": False})
+    step(0.3)   # 토크 없이 중력으로 움직임
+    q = float(server.data.qpos[server.JOINTS["A_j1"].qpos])
+    s = client.post("/joints/A_j1/torque", json={"enabled": True}).json()
+    assert s["targets"]["A_j1"] == pytest.approx(q) and q != pytest.approx(-0.8, abs=1e-3)
+
+    client.post("/joints", json={"A_j2": 0.8})
+    step(0.2)
+    s = to_velocity(client, "A_j2").json()
+    assert s["targets"]["A_j2"] == 0.0
+
+
+def test_reset_keeps_mode_and_torque(client):
+    to_velocity(client, "A_j2")
+    client.post("/joints/B_j1/torque", json={"enabled": False})
+    s = client.post("/reset").json()
+    assert s["modes"]["A_j2"] == "velocity" and s["torque"]["A_j2"] is True
+    assert s["torque"]["B_j1"] is False
 
 
 def _free_port():
