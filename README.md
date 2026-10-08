@@ -174,10 +174,19 @@ python real/server.py          # http://127.0.0.1:8000
 - 시작할 때 전 관절 토크를 끄고 위치 모드로 둠. 모터의 Min/Max Position Limit를 config 범위로 맞춤 (다를 때만 EEPROM에 씀). 서버를 끌 때도 토크를 끔
 - `kp`/`kv`는 XL430 Position P/D Gain 레지스터 값 그대로 (시뮬레이션의 N·m/rad와 다름). 프리셋은 `real/presets.json`에 따로 저장
 - `torque_limit`은 Goal PWM으로, `forces`는 Present Load로 근사 (1.4 N·m = 100%)
+- 현재 각도가 관절 범위 밖인 관절은 토크를 켤 수 없음 (409). **전체 토크 켜기**는 그 관절만 건너뛰고 나머지를 켠 뒤, 대시보드에 "범위 밖이라 토크를 켜지 않음"으로 알려 줌. 손으로 범위 안쪽으로 옮기거나 `config.json`의 `zero`/`sign`을 확인
 
 `check.py`가 확인하는 항목: 설정된 ID 응답, config에 없는 ID, 모델(XL430-W250), 운영 모드, Drive Mode 역방향 비트, 하드웨어 오류, 모터 위치 제한과 관절 범위, 현재 각도가 범위 안인지, 전압, 온도. 오류가 있으면 종료 코드 1.
 
 > WSL2에서는 `usbipd`로 U2D2를 WSL에 연결해야 `/dev/ttyUSB*`로 보입니다.
+
+### 처음 연결할 때 순서
+
+1. 모터 전원(12V)과 U2D2 USB를 연결하고 `python real/check.py`를 실행. 응답 없는 ID가 있으면 자동으로 전 보레이트를 스캔하므로, 찾은 ID/보레이트로 `config.json`을 고침
+2. `python real/check.py --watch`로 관절을 손으로 하나씩 움직여 ID 배정을 확인하고, 펼친 자세(0 rad)의 tick을 `zero`에, 오므림 방향이 시뮬레이션과 반대인 관절은 `sign`을 `-1`로 적음 (오므림: A는 음수, B/C는 양수 방향)
+3. `check.py`를 다시 실행해 오류나 "관절 범위 밖" 경고가 없는지 확인
+4. `python real/server.py`로 서버를 켜고 대시보드에서 관절 **하나씩** 토크를 켠 뒤, 작은 각도(0.1 rad 정도)부터 목표를 보내 방향과 동작을 확인
+5. 끝나면 Ctrl+C로 서버 종료 (전 관절 토크가 꺼짐)
 
 ---
 
