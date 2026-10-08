@@ -19,3 +19,4 @@ Thumbs.db
 
 # tri_hand 대시보드 프리셋 (사용자 데이터)
 src/presets.json
+real/presets.json

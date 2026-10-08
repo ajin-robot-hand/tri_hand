@@ -355,7 +355,11 @@ $("preset").onchange = () => {
   if (n) { fillForm(presets[n]); $("name").value = n; }
 };
 
-$("tq-all-on").onclick = () => post("/torque", { enabled: true }, "전체 토크 켜기 실패");
+$("tq-all-on").onclick = async () => {
+  const r = await post("/torque", { enabled: true }, "전체 토크 켜기 실패");
+  const skipped = Object.entries((r && r.skipped) || {});   // 실물 서버: 범위 밖이라 건너뛴 관절
+  if (skipped.length) msg(`범위 밖이라 토크를 켜지 않음: ${skipped.map(([n, q]) => `${n} ${q.toFixed(2)} rad`).join(", ")}`);
+};
 $("tq-all-off").onclick = () => post("/torque", { enabled: false }, "전체 토크 끄기 실패");
 
 $("apply").onclick = async () => {

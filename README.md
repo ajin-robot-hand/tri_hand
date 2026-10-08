@@ -155,6 +155,32 @@ python -m pytest tests
 
 ---
 
+## 🤖 실물 로봇 손 연결 (U2D2)
+
+`real/` 폴더는 U2D2로 연결한 실물 XL430 모터를 다룹니다. 모터 ID, 보레이트, 방향(`sign`), 0점(`zero`)은 `real/config.json`에 있고, 배선이나 모터 설정이 바뀌면 이 파일만 고칩니다.
+
+```bash
+python real/check.py           # config와 실물 비교 (읽기만 함, 토크/설정 변경 없음)
+python real/check.py --scan    # 전 보레이트 스캔: ID나 보레이트가 바뀐 모터 찾기
+python real/check.py --watch   # 현재 각도 실시간 출력: 손으로 움직여 ID 배정과 zero/sign 확인
+```
+
+대시보드로 실물 제어 (시뮬레이션 서버와 같은 API, 같은 `src/dashboard.html`):
+
+```bash
+python real/server.py          # http://127.0.0.1:8000
+```
+
+- 시작할 때 전 관절 토크를 끄고 위치 모드로 둠. 모터의 Min/Max Position Limit를 config 범위로 맞춤 (다를 때만 EEPROM에 씀). 서버를 끌 때도 토크를 끔
+- `kp`/`kv`는 XL430 Position P/D Gain 레지스터 값 그대로 (시뮬레이션의 N·m/rad와 다름). 프리셋은 `real/presets.json`에 따로 저장
+- `torque_limit`은 Goal PWM으로, `forces`는 Present Load로 근사 (1.4 N·m = 100%)
+
+`check.py`가 확인하는 항목: 설정된 ID 응답, config에 없는 ID, 모델(XL430-W250), 운영 모드, Drive Mode 역방향 비트, 하드웨어 오류, 모터 위치 제한과 관절 범위, 현재 각도가 범위 안인지, 전압, 온도. 오류가 있으면 종료 코드 1.
+
+> WSL2에서는 `usbipd`로 U2D2를 WSL에 연결해야 `/dev/ttyUSB*`로 보입니다.
+
+---
+
 ## 📁 프로젝트 구조
 
 ```
@@ -167,7 +193,13 @@ tri_hand/
 │   ├── run_sim.py      # 시뮬레이션 실행 및 손가락 제어 스크립트
 │   ├── server.py       # HTTP 제어 서버 + 프리셋 API
 │   └── dashboard.html  # 웹 대시보드 (server.py가 / 에서 제공)
-├── tests/              # server.py API 테스트 (pytest)
+├── real/               # 실물 제어 (U2D2 + XL430)
+│   ├── config.json     # 관절별 모터 ID, sign, zero, 범위 / 포트, 보레이트
+│   ├── config.py       # 설정 읽기와 검증
+│   ├── dxl.py          # dynamixel-sdk 래퍼, tick ↔ rad 변환
+│   ├── check.py        # 실물 값 확인 (ID/보레이트 스캔, 상태 점검, 각도 모니터)
+│   └── server.py       # 실물 HTTP 제어 서버 (대시보드 공용)
+├── tests/              # server.py API, real/ 테스트 (pytest)
 ├── tutorial/           # MuJoCo 모델링 기초 단계별 실습 예제
 │   ├── 01_hello.xml    # 기본 세상 구성 및 자유 낙하
 │   ├── 02_joints_tendon.xml # 다관절 링크 및 텐던 실습
