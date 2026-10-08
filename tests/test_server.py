@@ -332,6 +332,27 @@ def test_torque_on_holds_current_state(client):
     assert s["targets"]["A_j2"] == 0.0
 
 
+def test_bulk_torque_off_gives_zero_actuator_force_for_all_joints(client):
+    client.post("/joints", json={"A_j1": -1.0, "B_j1": 0.3})
+    step(0.1)
+    s = client.post("/torque", json={"enabled": False}).json()
+    assert s["torque"] == {n: False for n in JOINTS}
+    for _ in range(50):
+        mujoco.mj_step(server.model, server.data)
+        assert all(server.data.actuator_force[j.act] == 0.0 for j in server.JOINTS.values())
+
+
+def test_bulk_torque_on_holds_each_joints_current_state(client):
+    client.post("/joints/A_j1/torque", json={"enabled": False})
+    client.post("/joints", json={"B_j1": 0.6})
+    step(0.3)
+    q_a1 = float(server.data.qpos[server.JOINTS["A_j1"].qpos])   # 토크 꺼진 채 중력으로 움직인 값
+    s = client.post("/torque", json={"enabled": True}).json()
+    assert s["torque"] == {n: True for n in JOINTS}
+    assert s["targets"]["A_j1"] == pytest.approx(q_a1)
+    assert s["targets"]["B_j1"] == pytest.approx(0.6)
+
+
 def test_reset_keeps_mode_and_torque(client):
     to_velocity(client, "A_j2")
     client.post("/joints/B_j1/torque", json={"enabled": False})
