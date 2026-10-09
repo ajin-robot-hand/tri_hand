@@ -21,9 +21,9 @@ _spec = importlib.util.spec_from_file_location("real_server", ROOT / "real" / "s
 server = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(server)
 
-# 실물 보정값(zero)이 바뀌어도 테스트가 흔들리지 않게 zero는 중앙으로 고정
+# 실물 보정값(zero, sign)이 바뀌어도 테스트가 흔들리지 않게 고정
 _cfg = config.load()
-CFG = dataclasses.replace(_cfg, joints={n: dataclasses.replace(j, zero=2048) for n, j in _cfg.joints.items()})
+CFG = dataclasses.replace(_cfg, joints={n: dataclasses.replace(j, zero=2048, sign=1) for n, j in _cfg.joints.items()})
 
 
 class FakeBus:
