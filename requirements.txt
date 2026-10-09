@@ -8,3 +8,4 @@ uvicorn>=0.29
 
 # 카메라 원격 조종 (src/teleop.py)
 mediapipe>=0.10.30   # opencv-contrib-python(cv2)도 함께 설치됨
+dynamixel-sdk>=3.7   # 실물 모터 (src/motors.py)

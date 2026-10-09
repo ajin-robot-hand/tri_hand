@@ -13,11 +13,14 @@
   python teleop.py                 # 기본 웹캠(0번)
   python teleop.py --source 1      # 다른 카메라
   python teleop.py --source a.mp4  # 동영상 파일
+  python teleop.py --motors motors.json           # 실물 모터도 함께 구동 (motors.py 참고)
+  python teleop.py --motors motors.json --url ""  # 실물만 (시뮬레이션 서버 없이)
   미리보기 창에서 q: 종료
 """
 import argparse
 import json
 import time
+from contextlib import nullcontext
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -28,6 +31,7 @@ import numpy as np
 from mediapipe.tasks.python import BaseOptions
 from mediapipe.tasks.python.vision import HandLandmarker, HandLandmarkerOptions, RunningMode
 
+import motors
 from run_sim import CLOSE_SIGN, Q_CLOSE
 
 MODEL = Path(__file__).parent / "models" / "hand_landmarker.task"
@@ -126,7 +130,7 @@ def draw(frame, landmarks, lines: list[str]):
         cv2.putText(frame, line, (10, 25 + 22 * i), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
 
-def run(source, url: str, preview: bool):
+def run(source, url: str, preview: bool, motors_config: Path | None):
     ensure_model()
     cap = cv2.VideoCapture(source)
     if not cap.isOpened():
@@ -135,7 +139,8 @@ def run(source, url: str, preview: bool):
                                     running_mode=RunningMode.VIDEO, num_hands=1)
     smoother = Smoother()
     t0 = last = time.monotonic()
-    with HandLandmarker.create_from_options(options) as tracker:
+    hand = motors.load(motors_config, MAX_SPEED) if motors_config else nullcontext()
+    with HandLandmarker.create_from_options(options) as tracker, hand:
         while True:
             ok, frame = cap.read()
             if not ok:
@@ -148,7 +153,9 @@ def run(source, url: str, preview: bool):
                 # world 관절점: 손 중심 기준 m 단위 3D라 카메라 거리와 무관
                 points = np.array([[p.x, p.y, p.z] for p in result.hand_world_landmarks[0]])
                 targets = smoother(retarget(points), dt)
-                error = send(url, targets)
+                if motors_config:
+                    hand.send(targets)
+                error = send(url, targets) if url else None
                 lines = [f"{n} {q:+.2f}" for n, q in targets.items()] + ([error] if error else [])
                 landmarks = result.hand_landmarks[0]
             else:
@@ -167,7 +174,8 @@ def run(source, url: str, preview: bool):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", default="0", help="카메라 번호 또는 동영상 파일 경로")
-    ap.add_argument("--url", default="http://127.0.0.1:8000", help="server.py 주소")
+    ap.add_argument("--url", default="http://127.0.0.1:8000", help='server.py 주소. ""이면 시뮬레이션에 보내지 않음')
+    ap.add_argument("--motors", type=Path, help="motors.json 경로. 주면 실물 모터도 구동")
     ap.add_argument("--no-preview", action="store_true", help="창 없이 터미널에 목표 각도 출력")
     args = ap.parse_args()
-    run(int(args.source) if args.source.isdigit() else args.source, args.url, not args.no_preview)
+    run(int(args.source) if args.source.isdigit() else args.source, args.url, not args.no_preview, args.motors)
