@@ -21,7 +21,9 @@ _spec = importlib.util.spec_from_file_location("real_server", ROOT / "real" / "s
 server = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(server)
 
-CFG = config.load()
+# 실물 보정값(zero)이 바뀌어도 테스트가 흔들리지 않게 zero는 중앙으로 고정
+_cfg = config.load()
+CFG = dataclasses.replace(_cfg, joints={n: dataclasses.replace(j, zero=2048) for n, j in _cfg.joints.items()})
 
 
 class FakeBus:
@@ -31,7 +33,7 @@ class FakeBus:
         self.regs = {i: {"torque_enable": 1, "operating_mode": 16, "min_position_limit": 0,
                          "max_position_limit": 4095, "position_p_gain": 640, "position_d_gain": 0,
                          "goal_pwm": 885, "velocity_limit": 265, "present_position": 2048, "goal_position": 2048,
-                         "goal_velocity": 0, "present_velocity": 0, "present_load": 0, "hardware_error_status": 0}
+                         "goal_velocity": 0, "profile_velocity": 0, "present_velocity": 0, "present_load": 0, "hardware_error_status": 0}
                      for i in ids}
         self.writes = []
         self.fail = False
@@ -47,6 +49,8 @@ class FakeBus:
         r = self.regs[i]
         if name in ("operating_mode", "min_position_limit", "max_position_limit") and r["torque_enable"]:
             raise DxlError(f"ID {i} {name}: 토크가 켜져 있어 EEPROM 쓰기 불가")
+        if name == "torque_enable" and value and not r["torque_enable"]:
+            r["goal_position"] = r["present_position"]   # 실물처럼 토크를 켜면 목표가 현재 위치로 바뀜
         r[name] = value
         self.writes.append((i, name, value))
         if r["torque_enable"] and r["operating_mode"] == 3:
@@ -193,3 +197,27 @@ def test_comm_failure_returns_502(bus, client):
 def test_dashboard_served(client):
     r = client.get("/")
     assert r.status_code == 200 and "<html" in r.text.lower()
+
+
+def test_home_moves_all_joints_to_zero_with_torque_on(bus):
+    bus.regs[ID("C_j1")]["present_position"] = 3335   # +1.97 rad, 범위 밖이어도 0 rad로 옮김
+    hand = server.Hand(bus, CFG)
+    assert hand.home(timeout=0.1) == {}
+    for n, j in CFG.joints.items():
+        r = bus.regs[j.id]
+        assert r["torque_enable"] == 1 and r["goal_position"] == j.zero and hand.servos[n].torque
+        assert r["profile_velocity"] == 0   # 이동 뒤 원래 값으로 되돌림
+    assert (ID("C_j1"), "profile_velocity", round(server.HOME_SPEED / VEL_UNIT)) in bus.writes
+
+
+def test_home_reports_joints_that_did_not_arrive(bus):
+    hand = server.Hand(bus, CFG)
+    real_write = bus.write
+
+    def stuck_write(i, name, value):
+        real_write(i, name, value)
+        if i == ID("B_j2"):
+            bus.regs[i]["present_position"] = 2300   # 걸려서 움직이지 못함
+    bus.write = stuck_write
+    far = hand.home(timeout=0.05)
+    assert list(far) == ["B_j2"] and far["B_j2"] > 0.3

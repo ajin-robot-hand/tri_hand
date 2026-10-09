@@ -34,6 +34,7 @@ REG = {
     "position_p_gain": Reg(84, 2),
     "goal_pwm": Reg(100, 2, True),         # 885 = 100%
     "goal_velocity": Reg(104, 4, True),    # 0.229 rpm
+    "profile_velocity": Reg(112, 4),       # 0.229 rpm, 위치 모드 이동 속도 (0 = 제한 없음)
     "goal_position": Reg(116, 4, True),
     "present_load": Reg(126, 2, True),     # 0.1 %
     "present_velocity": Reg(128, 4, True),  # 0.229 rpm

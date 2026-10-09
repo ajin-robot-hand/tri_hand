@@ -171,7 +171,8 @@ python real/check.py --watch   # 현재 각도 실시간 출력: 손으로 움�
 python real/server.py          # http://127.0.0.1:8000
 ```
 
-- 시작할 때 전 관절 토크를 끄고 위치 모드로 둠. 모터의 Min/Max Position Limit를 config 범위로 맞춤 (다를 때만 EEPROM에 씀). 서버를 끌 때도 토크를 끔
+- 시작할 때 위치 모드로 두고 모터의 Min/Max Position Limit를 config 범위로 맞춤 (다를 때만 EEPROM에 씀)
+- 이어서 전 관절 토크를 켜고 0 rad(`zero` tick, 기본 2048)로 0.5 rad/s로 천천히 옮김. 범위 밖 관절도 함께 옮겨짐. 10초 안에 도착하지 못한 관절은 경고. 움직이지 않으려면 `--no-home`. 서버를 끌 때는 토크를 끔
 - `kp`/`kv`는 XL430 Position P/D Gain 레지스터 값 그대로 (시뮬레이션의 N·m/rad와 다름). 프리셋은 `real/presets.json`에 따로 저장
 - `torque_limit`은 Goal PWM으로, `forces`는 Present Load로 근사 (1.4 N·m = 100%)
 - 현재 각도가 관절 범위 밖인 관절은 토크를 켤 수 없음 (409). **전체 토크 켜기**는 그 관절만 건너뛰고 나머지를 켠 뒤, 대시보드에 "범위 밖이라 토크를 켜지 않음"으로 알려 줌. 손으로 범위 안쪽으로 옮기거나 `config.json`의 `zero`/`sign`을 확인

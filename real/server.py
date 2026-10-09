@@ -6,8 +6,11 @@
   python real/server.py                     # http://127.0.0.1:8000
   python real/server.py --port /dev/tty.usbserial-XXXX --host 0.0.0.0
 
+  python real/server.py --no-home           # 시작할 때 움직이지 않고 토크를 끈 채로 둠
+
 시뮬레이션 서버와 다른 점
-  - 시작하면 전 관절 토크를 끄고 위치 모드로 둠. 서버를 끌 때도 토크를 끔
+  - 시작하면 위치 모드로 두고 전 관절 토크를 켠 뒤 0 rad(config의 zero tick)로 천천히 옮김.
+    --no-home이면 토크를 끈 채로 둠. 서버를 끌 때는 토크를 끔
   - 시작할 때 모터의 Min/Max Position Limit를 config의 관절 범위로 맞춤 (다를 때만 EEPROM에 씀)
   - kp, kv는 XL430 Position P/D Gain 레지스터 값 그대로 (0~16383, 출고값 640/0).
     시뮬레이션의 N·m/rad 단위와 다르므로 프리셋 파일도 따로 씀 (real/presets.json)
@@ -37,7 +40,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, RootModel, ValidationError, model_validator
 
 import config as cfgmod
-from dxl import VEL_UNIT, Bus, DxlError, hw_errors, pick_port, rad_to_tick, tick_to_rad
+from dxl import TICKS_PER_REV, VEL_UNIT, Bus, DxlError, hw_errors, pick_port, rad_to_tick, tick_to_rad
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
@@ -51,6 +54,9 @@ PWM_MAX = 885        # Goal PWM 100%
 GAIN_MAX = 16383     # Position P/D Gain 레지스터 범위
 MODE_CODE = {"position": 3, "velocity": 1}   # Operating Mode 레지스터 값
 POLL_PERIOD = 0.02   # s, 상태 읽기 주기
+HOME_SPEED = 0.5     # rad/s, 시작할 때 0 rad로 옮기는 속도
+HOME_TIMEOUT = 10.0  # s
+HOME_TOLERANCE = 20  # tick (약 1.8°), 도착으로 보는 오차
 
 ModeName = Literal["position", "velocity"]
 
@@ -225,6 +231,39 @@ class Hand:
             self.bus.write(i, "position_d_gain", kv)
             self.bus.write(i, "goal_pwm", pwm_from_torque(torque_limit))
             s.kp, s.kv, s.torque_limit = kp, kv, torque_limit
+
+    def home(self, speed: float = HOME_SPEED, timeout: float = HOME_TIMEOUT) -> dict[str, float]:
+        """전 관절 토크를 켜고 0 rad(config의 zero tick)로 천천히 옮김. 범위 밖 관절도 목표가 범위 안이라 움직일 수 있음.
+
+        이동 중에만 Profile Velocity로 속도를 제한하고 끝나면 원래 값으로 되돌림.
+        timeout 안에 도착하지 못한 관절 → 현재 각도 (걸림, 과부하 등).
+        """
+        with self.lock:
+            saved = {}
+            for n, j in self.cfg.joints.items():
+                s = self.servos[n]
+                if s.mode != "position":
+                    self.bus.write(j.id, "torque_enable", 0)
+                    self.bus.write(j.id, "operating_mode", MODE_CODE["position"])
+                    s.mode = "position"
+                saved[n] = self.bus.read(j.id, "profile_velocity")
+                self.bus.write(j.id, "profile_velocity", max(1, round(speed / VEL_UNIT)))
+                # 토크를 켜는 순간 모터가 목표를 현재 위치로 덮어쓰므로, 목표는 켠 뒤에 씀
+                self.bus.write(j.id, "torque_enable", 1)
+                s.torque = True
+                self._send_goal(n, 0.0)
+        tol = HOME_TOLERANCE * 2 * math.pi / TICKS_PER_REV
+        deadline = time.monotonic() + timeout
+        while True:
+            self.poll()
+            far = {n: r["q"] for n, r in self.reading.items() if abs(r["q"]) > tol}
+            if not far or time.monotonic() > deadline:
+                break
+            time.sleep(POLL_PERIOD)
+        with self.lock:
+            for n, j in self.cfg.joints.items():
+                self.bus.write(j.id, "profile_velocity", saved[n])
+        return far
 
     def shutdown(self):
         with self.lock:
@@ -407,12 +446,22 @@ def main():
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--http-port", type=int, default=8000)
     ap.add_argument("--presets", type=Path, default=PRESETS_PATH, help="프리셋 JSON 파일 경로")
+    ap.add_argument("--no-home", action="store_true", help="시작할 때 0 rad로 옮기지 않고 토크를 끈 채로 둠")
     args = ap.parse_args()
 
     cfg = cfgmod.load(args.config)
     with Bus(pick_port(args.port, cfg.port), cfg.baudrate) as bus:
         hand = Hand(bus, cfg)
-        print("모든 관절 토크 꺼짐, 위치 모드. 대시보드에서 토크를 켜세요")
+        if args.no_home:
+            print("모든 관절 토크 꺼짐, 위치 모드. 대시보드에서 토크를 켜세요")
+        else:
+            print(f"전 관절 토크 켜고 0 rad(zero tick)로 이동 중 ({HOME_SPEED} rad/s)...")
+            far = hand.home()
+            if far:
+                print(f"⚠ {HOME_TIMEOUT:.0f}초 안에 0 rad에 도착하지 못함 (토크는 켜진 채 목표 0 유지): "
+                      f"{', '.join(f'{n} {q:+.2f} rad' for n, q in far.items())}")
+            else:
+                print("모든 관절 0 rad 도착, 토크 켜짐")
 
         stop = threading.Event()
 
