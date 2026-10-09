@@ -7,7 +7,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import teleop  # noqa: E402
-from run_sim import CLOSE_SIGN, Q_CLOSE, YAW_AMPLITUDE  # noqa: E402
+from run_sim import CLOSE_SIGN, Q_CLOSE, YAW_LIMIT  # noqa: E402
 
 
 def hand(mcp: float = 0.0, rest: float = 0.0, thumb: float = sum(teleop.THUMB_RANGE) / 2,
@@ -65,9 +65,9 @@ def test_thumb_spread_drives_a_j0(lift):
     lo, hi = teleop.THUMB_RANGE
     assert teleop.thumb_spread(hand(thumb=0.7, thumb_lift=lift)) == pytest.approx(0.7)
     a_j0 = lambda t: teleop.retarget(hand(thumb=t, thumb_lift=lift))["A_j0"]
-    assert a_j0(lo) == pytest.approx(-teleop.THUMB_SIGN * YAW_AMPLITUDE)   # 검지에 붙임 → 한쪽 끝
-    assert a_j0(hi) == pytest.approx(+teleop.THUMB_SIGN * YAW_AMPLITUDE)   # 최대로 벌림 → 반대쪽 끝
-    assert a_j0(hi + 1.0) == pytest.approx(+teleop.THUMB_SIGN * YAW_AMPLITUDE)   # 범위 밖은 끝에서 멈춤
+    assert a_j0(lo) == pytest.approx(-teleop.THUMB_SIGN * YAW_LIMIT)   # 검지에 붙임 → 한쪽 끝
+    assert a_j0(hi) == pytest.approx(+teleop.THUMB_SIGN * YAW_LIMIT)   # 최대로 벌림 → 반대쪽 끝
+    assert a_j0(hi + 1.0) == pytest.approx(+teleop.THUMB_SIGN * YAW_LIMIT)   # 범위 밖은 끝에서 멈춤
 
 
 def test_thumb_spread_not_changed_by_finger_bending():

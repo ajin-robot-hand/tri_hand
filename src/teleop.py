@@ -4,7 +4,7 @@
   검지 → A,  중지 → B,  약지 → C   (엄지/새끼는 쓰지 않음)
   사람 첫째 마디(MCP) 굽힘          → j1
   사람 나머지 마디(PIP+DIP) 굽힘 합 → j2
-  사람 엄지 좌우 벌림 → A_j0 (±run_sim.YAW_AMPLITUDE). 엄지가 손바닥 면에서 많이 벗어나면 A_j0는 유지
+  사람 엄지 좌우 벌림 → A_j0 (±run_sim.YAW_LIMIT). 엄지가 손바닥 면에서 많이 벗어나면 A_j0는 유지
 
 굽힘 정도를 0(펼침)~1(최대)로 바꾼 뒤 run_sim.Q_CLOSE(손가락끼리 안 부딪히는 오므림 각도)를 곱함.
 손을 놓치면 목표를 보내지 않음 → 로봇은 마지막 목표 자세를 유지.
@@ -33,7 +33,7 @@ from mediapipe.tasks.python import BaseOptions
 from mediapipe.tasks.python.vision import HandLandmarker, HandLandmarkerOptions, RunningMode
 
 import motors
-from run_sim import CLOSE_SIGN, Q_CLOSE, YAW_AMPLITUDE
+from run_sim import CLOSE_SIGN, Q_CLOSE, YAW_LIMIT
 
 MODEL = Path(__file__).parent / "models" / "hand_landmarker.task"
 MODEL_URL = ("https://storage.googleapis.com/mediapipe-models/hand_landmarker/"
@@ -52,7 +52,7 @@ HUMAN_RANGE = {
     "B": {"j1": (0.2, 1.4), "j2": (0.3, 2.6)},
     "C": {"j1": (0.2, 1.4), "j2": (0.3, 2.6)},
 }
-# 엄지 벌림 각도(rad) [검지에 붙임, 최대로 벌림] → A_j0 [-YAW_AMPLITUDE, +YAW_AMPLITUDE]. 시작값 (본인 손으로 확인 필요)
+# 엄지 벌림 각도(rad) [검지에 붙임, 최대로 벌림] → A_j0 [-YAW_LIMIT, +YAW_LIMIT]. 시작값 (본인 손으로 확인 필요)
 THUMB_RANGE = (0.3, 1.2)
 THUMB_SIGN = 1.0   # 엄지를 벌릴 때 A_j0 방향. 반대로 움직이면 -1.0
 MIN_THUMB_PROJECTION = 0.5   # 엄지 뼈가 손바닥 면에 비친 길이 비율. 이보다 작으면(약 60° 넘게 면을 벗어남) A_j0 유지
@@ -100,7 +100,7 @@ def retarget(points: np.ndarray) -> dict[str, float]:
     if spread is not None:
         lo, hi = THUMB_RANGE
         amount = float(np.clip((spread - lo) / (hi - lo), 0.0, 1.0))
-        targets["A_j0"] = THUMB_SIGN * YAW_AMPLITUDE * (2 * amount - 1)
+        targets["A_j0"] = THUMB_SIGN * YAW_LIMIT * (2 * amount - 1)
     for finger, bends in finger_bends(points).items():
         for j, angle in bends.items():
             lo, hi = HUMAN_RANGE[finger][j]

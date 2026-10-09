@@ -18,6 +18,7 @@ CLOSE_SIGN = {"A": -1.0, "B": +1.0, "C": +1.0}
 Q_CLOSE = {"j1": 0.3, "j2": 1.2}   # rad, 오므렸을 때 목표 각도 (크기). 이 값까지는 손가락끼리 안 부딪힘
 PERIOD = 4.0                       # s, 한 번 오므렸다 펴는 주기
 YAW_AMPLITUDE = 0.25               # rad, 엄지 대립(Yaw/A_j0) 회전 진폭 (~14.3도)
+YAW_LIMIT = 2.5 * YAW_AMPLITUDE    # rad (~35.8도), 원격 조종(teleop.py, motors.py)에서 A_j0가 갈 수 있는 끝
 
 
 def command(t: float) -> dict[str, float]:

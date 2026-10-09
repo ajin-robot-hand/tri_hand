@@ -6,7 +6,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import motors  # noqa: E402
-from run_sim import Q_CLOSE, YAW_AMPLITUDE  # noqa: E402
+from run_sim import Q_CLOSE, YAW_LIMIT  # noqa: E402
 
 
 class FakeBus:
@@ -57,7 +57,7 @@ def test_targets_are_clipped_between_straight_and_close_angle():
         h.send({"B_j2": 5.0, "A_j2": +0.5, "A_j0": 0.8})   # 지나치게 오므림 / 반대로 젖힘 / 엄지 요
         assert goal(bus, 5) == motors.to_raw(JOINTS["B_j2"], Q_CLOSE["j2"])
         assert goal(bus, 3) == JOINTS["A_j2"]["zero"]   # 펼침 너머로 가지 않음
-        assert goal(bus, 1) == motors.to_raw(JOINTS["A_j0"], YAW_AMPLITUDE)   # 엄지 요는 ±YAW_AMPLITUDE
+        assert goal(bus, 1) == motors.to_raw(JOINTS["A_j0"], YAW_LIMIT)   # 엄지 요는 ±YAW_LIMIT
 
 
 def test_joint_without_target_keeps_its_goal():
