@@ -154,18 +154,42 @@ python -m pytest tests
 
 ---
 
+## 📹 카메라 원격 조종 및 실물 모터 연동
+
+`src/teleop.py`를 사용해 웹캠으로 손을 인식(MediaPipe)하여 시뮬레이션 및 실물 Dynamixel 모터를 실시간으로 원격 조종할 수 있습니다.
+
+```bash
+# 1) 웹캠으로 시뮬레이션 손 원격 제어 (먼저 server.py 실행 필요)
+python src/teleop.py
+
+# 2) 실물 모터 캘리브레이션 (U2D2 연결 후 관절별 모터 ID/영점 기록)
+python src/motors.py calibrate --port /dev/ttyUSB0 --baud 1000000
+
+# 3) 실물 모터 및 시뮬레이션 동시 구동
+python src/teleop.py --motors src/motors.json
+```
+
+> 📖 **상세 실행 매뉴얼**:  
+> 환경 세팅, 관절 캘리브레이션, Sim-to-Real 미러링 및 트러블슈팅의 전체 과정은 **[docs/execution_guide.md](docs/execution_guide.md)**를 참고하세요.
+
+---
+
 ## 📁 프로젝트 구조
 
 ```
 tri_hand/
-├── docs/               # MuJoCo 이론 및 배경 학습 자료, 데모 미디어
+├── docs/               # 이론 배경 학습 자료, 데모 미디어 및 실행 가이드
+│   ├── execution_guide.md  # 🚀 [상세] 전체 스크립트 실행 및 하드웨어 연동 가이드
+│   └── mujoco.gif      # 시뮬레이션 데모 영상
 ├── src/                # 메인 시뮬레이션 모델 및 제어 환경
 │   ├── scene.xml       # 전체 시뮬레이션 씬 (바닥, 조명, 타겟 물체 등)
 │   ├── hand.xml        # 로봇 손 기구학/동역학 모델
 │   ├── meshes/         # 3D STL 메쉬 파일
-│   ├── run_sim.py      # 시뮬레이션 실행 및 손가락 제어 스크립트
+│   ├── run_sim.py      # 단독 시뮬레이션 실행 스크립트
 │   ├── server.py       # HTTP 제어 서버 + 프리셋 API
-│   └── dashboard.html  # 웹 대시보드 (server.py가 / 에서 제공)
+│   ├── dashboard.html  # 웹 대시보드 (server.py가 / 에서 제공)
+│   ├── teleop.py       # 웹캠(MediaPipe) 기반 비전 원격 조종
+│   └── motors.py       # 실물 Dynamixel 모터 제어 및 캘리브레이션
 ├── tests/              # server.py API 테스트 (pytest)
 ├── tutorial/           # MuJoCo 모델링 기초 단계별 실습 예제
 │   ├── 01_hello.xml    # 기본 세상 구성 및 자유 낙하

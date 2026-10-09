@@ -1,11 +1,11 @@
 # tri_hand MuJoCo Simulation Dependencies
-# Linux, macOS, Windows(WSL2) 크로스 플랫폼 호환
+# Cross-platform compatibility (Linux, macOS, Windows)
 
 mujoco==3.3.0
 numpy>=1.24.0,<=2.2.4
 fastapi>=0.110
 uvicorn>=0.29
 
-# 카메라 원격 조종 (src/teleop.py)
-mediapipe>=0.10.30   # opencv-contrib-python(cv2)도 함께 설치됨
-dynamixel-sdk>=3.7   # 실물 모터 (src/motors.py)
+# Camera Teleoperation (src/teleop.py)
+mediapipe>=0.10.30
+dynamixel-sdk>=3.7
