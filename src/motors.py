@@ -10,7 +10,7 @@
   python teleop.py --motors try           # 보정 없이 시험 (아래 TRY_ 가정, 관절당 ±TRY_MAX_ANGLE)
 
 안전 장치
-  - 목표는 각 관절의 [펼침 0, run_sim.Q_CLOSE] 범위로 잘라서 보냄. A_j0(엄지 요)는 0에 고정
+  - 목표는 각 관절의 [펼침 0, run_sim.Q_CLOSE] 범위로 잘라서 보냄. A_j0(엄지 요)는 ±run_sim.YAW_AMPLITUDE
   - 이동 속도는 모터의 Profile Velocity로 teleop.MAX_SPEED 이하
   - 시작 시 목표 = 현재 위치로 맞춘 뒤 토크를 켬 (튀지 않게)
   - 위치 제어 모드가 아니거나 하드웨어 에러가 있으면 시작하지 않음 (EEPROM 설정은 바꾸지 않음)
@@ -25,7 +25,7 @@ from pathlib import Path
 from dynamixel_sdk import COMM_RX_TIMEOUT, COMM_SUCCESS, GroupSyncRead, GroupSyncWrite, PacketHandler, PortHandler
 from serial import SerialException
 
-from run_sim import CLOSE_SIGN, Q_CLOSE
+from run_sim import CLOSE_SIGN, Q_CLOSE, YAW_AMPLITUDE
 
 CONFIG = Path(__file__).with_name("motors.json")
 DEFAULT_PORT = "/dev/tty.usbserial-FTBIN9LO"
@@ -51,10 +51,10 @@ MIN_CALIBRATION_TICKS = 100   # 약 9°. 이보다 덜 움직이면 어느 모�
 
 
 def safe_range(name: str) -> tuple[float, float]:
-    """관절이 갈 수 있는 범위(rad): 펼침(0) ~ 오므림 Q_CLOSE. A_j0는 대응이 확인되지 않아 0 고정"""
+    """관절이 갈 수 있는 범위(rad): 펼침(0) ~ 오므림 Q_CLOSE. A_j0는 ±YAW_AMPLITUDE (데모에서 쓰는 진폭)"""
     finger, _, j = name.partition("_")
     if j not in Q_CLOSE:
-        return 0.0, 0.0
+        return -YAW_AMPLITUDE, YAW_AMPLITUDE
     return tuple(sorted((0.0, CLOSE_SIGN[finger] * Q_CLOSE[j])))
 
 
@@ -162,10 +162,14 @@ class HandMotors:
         return self
 
     def send(self, targets: dict[str, float]):
+        """목표가 없는 관절은 보내지 않음 → 모터가 직전 목표 유지"""
         raw = {}
-        for name, c in self.joints.items():
+        for name, q in targets.items():
+            c = self.joints.get(name)
+            if c is None:   # 보정에서 건너뛴 관절
+                continue
             lo, hi = safe_range(name)
-            q = min(max(targets.get(name, 0.0), lo), hi)   # 목표가 없는 관절(A_j0 등)은 펼침 0
+            q = min(max(q, lo), hi)
             q = min(max(q, -self.max_angle), self.max_angle)
             raw[c["id"]] = to_raw(c, q)
         self.bus.goals(raw)
@@ -217,7 +221,7 @@ def detect(before: dict[int, int], after: dict[int, int], taken: set[int]) -> tu
 
 def motor_sign(name: str, close_delta: int) -> int:
     """오므림 방향으로 굽혔을 때의 틱 변화 → sign. 시뮬레이션의 오므림이 CLOSE_SIGN 방향이므로
-    sign = 실제 이동 방향 × CLOSE_SIGN. A_j0는 오므림 방향이 정의되지 않아 +1 (0에 고정되므로 무관)"""
+    sign = 실제 이동 방향 × CLOSE_SIGN. A_j0는 오므림 방향이 없어 +1. 시뮬레이션과 반대로 돌면 motors.json에서 -1로"""
     finger, _, j = name.partition("_")
     if j not in Q_CLOSE:
         return 1
