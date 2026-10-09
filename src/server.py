@@ -16,6 +16,7 @@ API (기본 http://127.0.0.1:8000)
   POST /velocities  목표 속도 지정 (rad/s). 예) {"A_j2": 0.5}
   POST /grasp    {"amount": 0~1} 로 전 손가락 오므림 정도 지정 (A_j0 제외)
   POST /joints/{name}/torque  {"enabled": bool} 토크 켜기/끄기. 켜는 순간 목표를 현재 상태로 맞춤
+  POST /torque                {"enabled": bool} 전 관절의 토크를 한 번에 켜기/끄기 (관절별 로직과 동일)
   POST /joints/{name}/mode    {"mode": "position" | "velocity"} 토크가 꺼져 있을 때만 가능 (XL430과 같음)
   POST /reset    시뮬레이션 상태 초기화 (게인, 모드, 토크 켜짐은 유지)
 
@@ -260,6 +261,19 @@ def set_torque(req: TorqueRequest, name: str):
             data.ctrl[j.act] = MODES[s.mode].hold(j)   # 켜는 순간 관절이 튀지 않게
         s.torque = req.enabled
         _write(name)
+        return _state()
+
+
+@app.post("/torque")
+def set_all_torque(req: TorqueRequest):
+    """전 관절에 /joints/{name}/torque와 같은 로직을 한 번에 적용."""
+    with lock:
+        for name, j in JOINTS.items():
+            s = SERVOS[name]
+            if req.enabled and not s.torque:
+                data.ctrl[j.act] = MODES[s.mode].hold(j)   # 켜는 순간 관절이 튀지 않게
+            s.torque = req.enabled
+            _write(name)
         return _state()
 
 
