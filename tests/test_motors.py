@@ -100,3 +100,20 @@ def test_detect_picks_moved_motor_and_ignores_small_or_taken():
     assert motors.detect(before, {1: 2010, 2: 1700, 3: 2000}, taken=set()) == (2, -300)
     assert motors.detect(before, {1: 2050, 2: 2000, 3: 2000}, taken=set()) is None
     assert motors.detect(before, {1: 2000, 2: 1700, 3: 2400}, taken={3}) == (2, -300)
+
+
+def test_try_mode_uses_id_order_start_pose_as_zero_and_small_limit():
+    bus = FakeBus(range(1, 8), present=1500)
+    bus.ping = lambda: {i: 1060 for i in range(1, 8)}
+    with motors.try_hand(bus, max_speed=3.0) as h:
+        assert [c["id"] for c in h.joints.values()] == list(range(1, 8))
+        h.send({"B_j2": 1.2})   # 보정했다면 갈 수 있는 오므림 끝
+        assert goal(bus, 5) == 1500 + round(motors.TRY_MAX_ANGLE * motors.TICKS_PER_RAD)
+        assert goal(bus, 1) == 1500   # A_j0는 시작 자세 유지
+
+
+def test_try_mode_refuses_unexpected_ids():
+    bus = FakeBus([1, 2, 3])
+    bus.ping = lambda: {1: 1060, 2: 1060, 3: 1060}
+    with pytest.raises(SystemExit):
+        motors.try_hand(bus, max_speed=3.0)

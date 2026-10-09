@@ -7,6 +7,7 @@
   python motors.py calibrate   # 토크 끈 채로 손으로 관절을 움직여 motors.json 작성
   python motors.py check       # 토크 끈 채로 현재 관절 각도(rad) 출력. 손으로 움직여 부호 확인
   python teleop.py --motors motors.json   # 카메라로 실물 구동
+  python teleop.py --motors try           # 보정 없이 시험 (아래 TRY_ 가정, 관절당 ±TRY_MAX_ANGLE)
 
 안전 장치
   - 목표는 각 관절의 [펼침 0, run_sim.Q_CLOSE] 범위로 잘라서 보냄. A_j0(엄지 요)는 0에 고정
@@ -44,6 +45,8 @@ MODELS = {1060: "XL430-W250", 1020: "XM430-W350", 1030: "XM430-W210"}
 
 TICKS_PER_RAD = 4096 / (2 * math.pi)
 RPM_PER_UNIT = 0.229          # Profile Velocity 단위
+# 보정 없이 시험할 때의 가정: ID 1~7 = JOINT_NAMES 순서, 시작 자세 = 0 rad, 방향은 모름
+TRY_MAX_ANGLE = 0.3           # rad (약 17°). 방향이 반대여도 크게 젖혀지지 않게
 MIN_CALIBRATION_TICKS = 100   # 약 9°. 이보다 덜 움직이면 어느 모터인지 판단하지 않음
 
 
@@ -137,8 +140,8 @@ class Bus:
 class HandMotors:
     """관절 이름 단위 목표(rad)를 실물 모터로. with 블록을 벗어나면 토크 끔"""
 
-    def __init__(self, bus, joints: dict[str, dict], max_speed: float):
-        self.bus, self.joints = bus, joints
+    def __init__(self, bus, joints: dict[str, dict], max_speed: float, max_angle: float = math.inf):
+        self.bus, self.joints, self.max_angle = bus, joints, max_angle
         self.ids = [c["id"] for c in joints.values()]
         for name, c in joints.items():
             mode = bus.read(c["id"], OPERATING_MODE)
@@ -163,6 +166,7 @@ class HandMotors:
         for name, c in self.joints.items():
             lo, hi = safe_range(name)
             q = min(max(targets.get(name, 0.0), lo), hi)   # 목표가 없는 관절(A_j0 등)은 펼침 0
+            q = min(max(q, -self.max_angle), self.max_angle)
             raw[c["id"]] = to_raw(c, q)
         self.bus.goals(raw)
 
@@ -183,8 +187,23 @@ def read_config(path: Path) -> dict:
 
 
 def load(path: Path, max_speed: float) -> HandMotors:
+    """path가 "try"면 보정 없이 시험용 배정"""
+    if str(path) == "try":
+        return try_hand(Bus(DEFAULT_PORT, DEFAULT_BAUD), max_speed)
     cfg = read_config(path)
     return HandMotors(Bus(cfg["port"], cfg["baud"]), cfg["joints"], max_speed)
+
+
+def try_hand(bus, max_speed: float) -> HandMotors:
+    """ID 1~7을 JOINT_NAMES 순서로, 지금 자세를 0 rad로 보고, 각도를 ±TRY_MAX_ANGLE로 제한"""
+    expected = list(range(1, len(JOINT_NAMES) + 1))
+    found = sorted(bus.ping())
+    if found != expected:
+        bus.close()
+        raise SystemExit(f"응답한 모터 ID {found}: 시험 모드는 ID {expected}가 필요. calibrate를 쓰세요")
+    present = bus.positions(expected)
+    joints = {n: {"id": i, "zero": present[i], "sign": 1} for n, i in zip(JOINT_NAMES, expected)}
+    return HandMotors(bus, joints, max_speed, max_angle=TRY_MAX_ANGLE)
 
 
 def detect(before: dict[int, int], after: dict[int, int], taken: set[int]) -> tuple[int, int] | None:

@@ -15,6 +15,7 @@
   python teleop.py --source a.mp4  # 동영상 파일
   python teleop.py --motors motors.json           # 실물 모터도 함께 구동 (motors.py 참고)
   python teleop.py --motors motors.json --url ""  # 실물만 (시뮬레이션 서버 없이)
+  python teleop.py --motors try --url ""          # 보정 없이 실물 시험 (손을 곧게 편 채 시작)
   미리보기 창에서 q: 종료
 """
 import argparse
@@ -175,7 +176,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", default="0", help="카메라 번호 또는 동영상 파일 경로")
     ap.add_argument("--url", default="http://127.0.0.1:8000", help='server.py 주소. ""이면 시뮬레이션에 보내지 않음')
-    ap.add_argument("--motors", type=Path, help="motors.json 경로. 주면 실물 모터도 구동")
+    ap.add_argument("--motors", type=Path, help='motors.json 경로, 또는 "try"(보정 없이 시험). 주면 실물 모터도 구동')
     ap.add_argument("--no-preview", action="store_true", help="창 없이 터미널에 목표 각도 출력")
     args = ap.parse_args()
     run(int(args.source) if args.source.isdigit() else args.source, args.url, not args.no_preview, args.motors)
