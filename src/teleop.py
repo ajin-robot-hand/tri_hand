@@ -4,7 +4,7 @@
   검지 → A,  중지 → B,  약지 → C   (엄지/새끼는 쓰지 않음)
   사람 첫째 마디(MCP) 굽힘          → j1
   사람 나머지 마디(PIP+DIP) 굽힘 합 → j2
-  사람 검지 좌우 벌림 → A_j0 (±run_sim.YAW_AMPLITUDE). 검지를 많이 굽히면 좌우 각도를 믿을 수 없어 A_j0는 유지
+  사람 엄지 좌우 벌림 → A_j0 (±run_sim.YAW_AMPLITUDE). 엄지가 손바닥 면에서 많이 벗어나면 A_j0는 유지
 
 굽힘 정도를 0(펼침)~1(최대)로 바꾼 뒤 run_sim.Q_CLOSE(손가락끼리 안 부딪히는 오므림 각도)를 곱함.
 손을 놓치면 목표를 보내지 않음 → 로봇은 마지막 목표 자세를 유지.
@@ -52,9 +52,10 @@ HUMAN_RANGE = {
     "B": {"j1": (0.2, 1.4), "j2": (0.3, 2.6)},
     "C": {"j1": (0.2, 1.4), "j2": (0.3, 2.6)},
 }
-SPREAD_MAX = 0.3    # rad, 검지 좌우 벌림이 이만큼이면 A_j0 끝까지. 시작값 (본인 손으로 확인 필요)
-SPREAD_SIGN = 1.0   # 검지를 엄지 쪽으로 벌릴 때 A_j0 방향. 반대로 움직이면 -1.0
-MIN_SPREAD_PROJECTION = 0.5   # 검지 첫 마디가 손바닥 면에 비친 길이 비율. 이보다 작으면(약 60° 넘게 굽힘) A_j0 유지
+# 엄지 벌림 각도(rad) [검지에 붙임, 최대로 벌림] → A_j0 [-YAW_AMPLITUDE, +YAW_AMPLITUDE]. 시작값 (본인 손으로 확인 필요)
+THUMB_RANGE = (0.3, 1.2)
+THUMB_SIGN = 1.0   # 엄지를 벌릴 때 A_j0 방향. 반대로 움직이면 -1.0
+MIN_THUMB_PROJECTION = 0.5   # 엄지 뼈가 손바닥 면에 비친 길이 비율. 이보다 작으면(약 60° 넘게 면을 벗어남) A_j0 유지
 SMOOTHING = 0.4    # 지수 평활 계수: 새 값 비중. 작을수록 부드럽고 느림
 MAX_SPEED = 3.0    # rad/s, 목표 변화 속도 상한. XL430 기본 속도 한계 6.36 rad/s의 절반 이하
 
@@ -76,28 +77,30 @@ def finger_bends(points: np.ndarray) -> dict[str, dict[str, float]]:
     return out
 
 
-def index_spread(points: np.ndarray) -> float | None:
-    """검지 첫 마디가 손목→검지 MCP 선에서 엄지 쪽으로 벌어진 각도(rad, 반대쪽은 음수).
-    손가락은 손목에서 부채꼴로 퍼지므로 기준을 손목→검지 MCP로 잡아 편한 자세가 0이 되게 함.
-    손바닥 면에서 재므로 손 기울기·굽힘과 무관. 많이 굽혀 손바닥 면에 비친 길이가 짧으면 None"""
+def thumb_spread(points: np.ndarray) -> float | None:
+    """엄지 손허리뼈(CMC→MCP)가 손목→검지 MCP 선에서 엄지 쪽으로 벌어진 각도(rad).
+    손바닥 면에서 재므로 손 기울기와 무관하고, 엄지 끝마디를 굽혀도 변하지 않음.
+    엄지가 손바닥 면에서 많이 벗어나 비친 길이가 짧으면 방향을 믿을 수 없어 None"""
     forward = points[9] - points[0]                 # 손목 → 중지 MCP
     forward /= np.linalg.norm(forward)
     side = points[5] - points[9]                    # 중지 MCP → 검지 MCP: 엄지 쪽
     side -= side @ forward * forward
     side /= np.linalg.norm(side)
-    d = points[6] - points[5]                       # 검지 첫 마디
-    if np.hypot(d @ side, d @ forward) < MIN_SPREAD_PROJECTION * np.linalg.norm(d):
+    d = points[2] - points[1]                       # 엄지 CMC → MCP
+    if np.hypot(d @ side, d @ forward) < MIN_THUMB_PROJECTION * np.linalg.norm(d):
         return None
     ref = points[5] - points[0]
     return float(np.arctan2(d @ side, d @ forward) - np.arctan2(ref @ side, ref @ forward))
 
 
 def retarget(points: np.ndarray) -> dict[str, float]:
-    """관절점 → 로봇 목표 각도(rad). 굽힘 정도 0~1 × 오므림 방향 × Q_CLOSE, 검지 좌우 → A_j0"""
+    """관절점 → 로봇 목표 각도(rad). 굽힘 정도 0~1 × 오므림 방향 × Q_CLOSE, 엄지 좌우 → A_j0"""
     targets = {}
-    spread = index_spread(points)
+    spread = thumb_spread(points)
     if spread is not None:
-        targets["A_j0"] = SPREAD_SIGN * YAW_AMPLITUDE * float(np.clip(spread / SPREAD_MAX, -1.0, 1.0))
+        lo, hi = THUMB_RANGE
+        amount = float(np.clip((spread - lo) / (hi - lo), 0.0, 1.0))
+        targets["A_j0"] = THUMB_SIGN * YAW_AMPLITUDE * (2 * amount - 1)
     for finger, bends in finger_bends(points).items():
         for j, angle in bends.items():
             lo, hi = HUMAN_RANGE[finger][j]
@@ -179,7 +182,10 @@ def run(source, url: str, preview: bool, motors_config: Path | None):
                 if motors_config:
                     hand.send(targets)
                 error = send(url, targets) if url else None
-                lines = [f"{n} {q:+.2f}" for n, q in targets.items()] + ([error] if error else [])
+                spread = thumb_spread(points)   # THUMB_RANGE 맞추기용
+                lines = ([f"{n} {q:+.2f}" for n, q in targets.items()]
+                         + [f"thumb spread {spread:.2f}" if spread is not None else "thumb spread -"]
+                         + ([error] if error else []))
                 landmarks = result.hand_landmarks[0]
             else:
                 lines, landmarks = ["no hand: holding last pose"], None
