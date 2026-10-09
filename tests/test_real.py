@@ -11,6 +11,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "real"))
+import center  # noqa: E402
 import check  # noqa: E402
 import config  # noqa: E402
 from dxl import DxlError, hw_errors, rad_to_tick, tick_to_rad  # noqa: E402
@@ -89,3 +90,24 @@ def test_inspect_read_failure():
         raise DxlError("ID 1 model_number 읽기 실패")
     r = check.inspect_motor("A_j1", J, read)
     assert r.errors and r.values == {}
+
+
+
+@pytest.mark.parametrize("present, offset, expected", [
+    (2045, 0, (3, 2048)),          # 처음 설정
+    (2048, 3, (3, 2048)),          # 이미 맞춘 상태에서 다시 실행해도 그대로
+    (3105, 0, (-1024, 2081)),      # Homing Offset 한계를 넘는 만큼은 zero로
+    (1005, 0, (1024, 2029)),
+    (2081, -1024, (-1024, 2081)),
+    (2048 + 4096, 0, (0, 2048)),   # 토크가 꺼진 채 한 바퀴 넘게 돌아 multi-turn으로 읽힌 경우
+])
+def test_center_plan(present, offset, expected):
+    assert center.plan(present, offset) == expected
+
+
+def test_center_write_zeros(tmp_path):
+    p = tmp_path / "config.json"
+    p.write_text((ROOT / "real" / "config.json").read_text())
+    center.write_zeros(p, {"A_j2": 2081, "B_j1": 2029})
+    cfg = config.load(p)
+    assert (cfg.joints["A_j2"].zero, cfg.joints["B_j1"].zero, cfg.joints["A_j1"].zero) == (2081, 2029, 2048)

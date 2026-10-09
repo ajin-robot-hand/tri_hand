@@ -23,6 +23,7 @@ REG = {
     "baud_rate": Reg(8, 1),
     "drive_mode": Reg(10, 1),             # bit0: 역방향
     "operating_mode": Reg(11, 1),
+    "homing_offset": Reg(20, 4, True),    # Present Position = 실제 위치 + 이 값
     "temperature_limit": Reg(31, 1),      # °C
     "velocity_limit": Reg(44, 4),          # 0.229 rpm
     "max_position_limit": Reg(48, 4),
