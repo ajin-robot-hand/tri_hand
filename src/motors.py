@@ -21,14 +21,15 @@ import math
 import sys
 from pathlib import Path
 
-from dynamixel_sdk import COMM_SUCCESS, GroupSyncRead, GroupSyncWrite, PacketHandler, PortHandler
+from dynamixel_sdk import COMM_RX_TIMEOUT, COMM_SUCCESS, GroupSyncRead, GroupSyncWrite, PacketHandler, PortHandler
 from serial import SerialException
 
 from run_sim import CLOSE_SIGN, Q_CLOSE
 
 CONFIG = Path(__file__).with_name("motors.json")
-DEFAULT_PORT = "/dev/tty.usbserial-FTBINA6H"
-DEFAULT_BAUD = 57600
+DEFAULT_PORT = "/dev/tty.usbserial-FTBIN9LO"
+DEFAULT_BAUD = 1000000   # 실물 손 모터 7개(ID 1~7)의 설정값. 2026-10-09 ping으로 확인
+BAUDRATES = [1000000, 57600, 115200, 2000000, 3000000, 4000000, 9600, 4500000]   # XL430/XM430 설정 가능 값
 JOINT_NAMES = ["A_j0", "A_j1", "A_j2", "B_j1", "B_j2", "C_j1", "C_j2"]
 
 # XL430/XM430 공통 Control Table (Protocol 2.0): (주소, 바이트 수)
@@ -73,6 +74,9 @@ class Bus:
             opened = False
         if not opened:
             raise SystemExit(f"포트를 열 수 없음: {port} (U2D2 연결, 포트 이름 확인)")
+        self.baud(baud)
+
+    def baud(self, baud: int):
         if not self.port.setBaudRate(baud):
             self.port.closePort()
             raise SystemExit(f"통신 속도 설정 실패: {baud}")
@@ -86,6 +90,8 @@ class Bus:
     def ping(self) -> dict[int, int]:
         """연결된 모터 {ID: 모델 번호}"""
         found, result = self.packet.broadcastPing(self.port)
+        if result == COMM_RX_TIMEOUT:   # 아무 모터도 응답하지 않음
+            return {}
         if result != COMM_SUCCESS:
             raise IOError(f"broadcast ping: {self.packet.getTxRxResult(result)}")
         return {i: info[0] for i, info in found.items()}
@@ -204,7 +210,14 @@ def calibrate(port: str, baud: int, path: Path):
     try:
         found = bus.ping()
         if not found:
-            raise SystemExit("모터가 응답하지 않음. 전원, 배선, 통신 속도(--baud) 확인")
+            for other in BAUDRATES:
+                if other == baud:
+                    continue
+                bus.baud(other)
+                if bus.ping():
+                    raise SystemExit(f"{baud}에서는 응답 없고 {other}에서 응답함. --baud {other} 로 다시 실행")
+            raise SystemExit("모든 통신 속도에서 모터가 응답하지 않음. 모터 전원(U2D2는 신호만 전달, "
+                             "Power Hub나 SMPS 필요)과 배선을 확인")
         for i, m in sorted(found.items()):
             print(f"ID {i}: {MODELS.get(m, f'모델 번호 {m}')}")
         ids = sorted(found)
