@@ -1,0 +1,8 @@
+# Heartbeat audio analysis dependencies (NOT needed for playback)
+# Install: pip install -r requirements.txt -r requirements-analysis.txt
+# ffmpeg/ffprobe 불필요: soundfile이 mp3 직접 디코딩, opencv 불필요: 영상은 실행에 사용 안 함
+
+librosa>=0.10
+numba>=0.61        # supports numpy 2.2 (compatible with numpy<=2.2.4 in requirements.txt)
+soundfile
+matplotlib

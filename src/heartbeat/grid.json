@@ -1,0 +1,13 @@
+{
+  "bpm": 135.0,
+  "first_downbeat": 0.422,
+  "beats_per_bar": 4,
+  "bars": 45,
+  "_notes": {
+    "beat_period_ms": 444.444,
+    "bar_period_s": 1.77778,
+    "bar_k_start_s": "first_downbeat + (k-1) * bars_per_beat * beat_period",
+    "end_s": 80.422,
+    "confirmed_by": "click_phase0 청취 확인 (2026-10-10)"
+  }
+}
