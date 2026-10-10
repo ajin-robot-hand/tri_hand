@@ -1,268 +1,199 @@
-# tri_hand: Sim-to-Real 로봇 핸드 제어
+# tri_hand: 비트 동기화 안무 (Heartbeat)
 
-3지 다관절 로봇 손(`tri_hand`)을 위한 Sim-to-Real 제어 프로젝트입니다.
+3지 다관절 로봇 손(`tri_hand`)이 **음원 박자에 맞춰 미리 정의된 안무를 재생**하는 프로젝트입니다.
 
-**MuJoCo 물리 시뮬레이션을 먼저 구축하여 기구학·동역학 및 제어 로직을 선행 검증(Sim-First)** 했습니다. 이후 검증된 가상 모델을 기반으로 **동일한 제어 인터페이스(HTTP API & 웹 대시보드)를 통해 실물 로봇(Real Hand, Dynamixel XL430)까지 연결 및 동작 검증을 완료**했습니다.
+이전 Sim-to-Real 텔레오퍼레이션 프로젝트의 **MuJoCo 기구학/동역학 모델(`hand.xml`, `scene.xml`)과 실물 Dynamixel 모터 드라이버(`motors.py`)를 재사용**하되, 목표는 완전히 다릅니다 — 카메라나 실시간 입력 없이, 노래 **"Heartbeat"**(2PM, 135 BPM)의 안무를 분석해 **규칙 기반 시간표**로 미리 계산하고, 오디오 재생 위치 하나만을 마스터 클럭으로 삼아 로봇 손이 박자에 맞춰 움직이도록 합니다.
 
-가상 시뮬레이션 환경에서의 안전한 테스트부터 실물 로봇 손의 정밀 구동까지 코드와 UI 변경 없이 매끄럽게 전환할 수 있습니다.
+| MuJoCo 시뮬레이션 (안무 재생) |
+| :---: |
+| <img src="docs/mujoco.gif" alt="tri_hand MuJoCo 시뮬레이션 데모" width="100%"> |
 
-| MuJoCo 시뮬레이션 (Sim-First 검증) | 실물 로봇 손 (Real Hand 검증) |
-| :---: | :---: |
-| <img src="docs/mujoco.gif" alt="tri_hand MuJoCo 시뮬레이션 데모" width="100%"> | *(실물 로봇 구동 영상/데모 추가 예정)* |
+> 안무의 원본은 [`docs/heartbeat/heartbeat.mp4`](docs/heartbeat/heartbeat.mp4)(0~33초 구간)이며, 영상은 **실행 시에는 전혀 쓰이지 않습니다.** 영상을 사람이 관찰해 `motions.json`/`schedule.json`에 손 동작으로 옮겨 적었고, 재생은 오직 `grid.json`의 비트 격자 수식으로만 이뤄집니다. 근거는 [docs/heartbeat/choreography.md](docs/heartbeat/choreography.md) 참조.
+
+---
+
+## 📋 목차
+
+1. [프로젝트 아키텍처](#-프로젝트-아키텍처)
+2. [핵심 기능](#-핵심-기능-key-features)
+3. [빠른 시작](#-빠른-시작-quick-start)
+4. [비트 동기화 재생 (`heartbeat/play.py`)](#-비트-동기화-재생-heartbeatplaypy)
+5. [안무 커스터마이징](#-안무-커스터마이징)
+6. [환경 세팅 (Setup)](#-환경-세팅-setup)
+7. [실물 로봇 손 연동 (`motors.py`)](#-실물-로봇-손-연동-motorspy)
+8. [기구학 및 하드웨어 사양](#️-기구학-및-하드웨어-사양-kinematics-specs)
+9. [프로젝트 구조](#-프로젝트-구조)
+10. [테스트 실행](#-테스트-실행)
 
 ---
 
 ## 🏛 프로젝트 아키텍처
 
-시뮬레이션(`src/server.py`)과 실물 로봇(`real/server.py`)이 **동일한 REST API 규격과 웹 대시보드**를 공유하므로, 가상 환경에서 검증한 자세·프리셋·제어 로직을 실물 로봇에 즉시 투입할 수 있습니다.
+모든 안무는 음원 시각 `t`(초)를 입력받아 7관절 목표 각도(rad)를 반환하는 **순수 함수 `choreo(t)`** 하나로 귀결됩니다. 상태를 누적하지 않으므로, 마스터 클럭(오디오 재생 위치)만 정확하면 시간이 아무리 지나도 오차가 쌓이지 않습니다.
 
-```mermaid
-graph TD
-    UI["웹 대시보드 (src/dashboard.html)<br/>실시간 관절 모니터링 · 개별/전체 토크 스위치 · 프리셋"]
-
-    subgraph Shared_API ["공용 REST API (/status, /target, /torque, /presets, /reset)"]
-        ServerSim["가상 시뮬레이션 서버<br/>(src/server.py)"]
-        ServerReal["실물 로봇 제어 서버<br/>(real/server.py)"]
-    end
-
-    Cam["카메라 원격 조종 (src/teleop.py)<br/>웹캠 → MediaPipe 손 인식 → 관절 목표 각도"]
-
-    UI <--> ServerSim
-    UI <--> ServerReal
-    Cam --> ServerSim
-    Cam --> ServerReal
-
-    subgraph Simulation_Side ["Sim-First 검증"]
-        ServerSim --> MuJoCo["MuJoCo 물리 엔진<br/>(hand.xml / scene.xml)"]
-    end
-
-    subgraph Hardware_Side ["Real Hand 배포"]
-        ServerReal --> DXL["U2D2 + Dynamixel SDK<br/>(7x XL430-W250-T)"]
-    end
+```
+grid.json (BPM·첫 박·마디 수)
+   │
+   ▼
+grid.py          마디·박 ↔ 음원 시각(s) 변환 (순수 함수)
+   │
+   ▼
+schedule.json    마디 구간별 동작 배정 표
+schedule.py      구간 표 → 전역 타임라인(절대 시각 키프레임) 생성
+   │
+   ▼
+motions.json     동작 A~E 키프레임 정의 (정규화 오므림량 0~1)
+choreo.py        choreo(t) → 7관절 목표 각도(rad)   ★ Sim/실물 공용 순수 함수
+   │
+   ├─▶ validate.py   재생 전 안전 범위·속도 상한·격자 정렬·길이 자동 검증
+   │
+   ▼
+play.py          AudioClock(재생 샘플 수 기준)을 마스터 클럭으로 MuJoCo 뷰어 구동
+   │
+   ├─▶ MuJoCo (run_sim.py의 scene.xml / hand.xml)   ← 현재 구현 범위
+   └─▶ motors.py (실물 Dynamixel)                    ← Phase 6, 미착수
 ```
 
 ---
 
 ## ✨ 핵심 기능 (Key Features)
 
-* **3D 물리 시뮬레이션 (MuJoCo)**
-  - 3지 7자유도 로봇 손의 정밀 기구학/동역학 모델링 (`hand.xml`, `scene.xml`)
-  - 시각용 메쉬(STL)와 충돌용 지오메트리(Primitive) 분리로 빠르고 안정적인 물리 연산
-  - 단계별 MuJoCo 모델링 학습을 위한 `tutorial/` 예제 코드 포함
-* **실물 로봇 하드웨어 인터페이스 (`real/`)**
-  - U2D2 인터페이스 및 `dynamixel-sdk`를 통한 7개 모터 동시 제어
-  - **하드웨어 진단 도구 (`real/check.py`)**: 전 보레이트 자동 스캔, 영점/방향 실시간 모니터링, 전압·온도·동작 모드 무결성 점검
-  - **안전 기능 내장**: 가동 범위 초과 관절 토크 보호(409), 서버 시작 시 부드러운 0 rad 안전 Homing (0.5 rad/s)
-* **카메라 원격 조종 (`src/teleop.py`)**
-  - 일반 웹캠으로 사람 손을 인식해 로봇 손가락을 실시간으로 따라 움직임 (데이터 글러브 불필요)
-  - 대시보드와 같은 API로 목표를 보내므로 시뮬레이션·실물 어느 서버에든 그대로 연결
-* **통합 웹 대시보드 & 프리셋 시스템**
-  - 관절 7개 실시간 각도, 목표 각도, 각속도, 토크, 게인 모니터링 (0.2초 주기 갱신)
-  - 원클릭 전체 토크 제어 및 관절별 독립 토크 스위치
-  - 모터 7개의 자세와 게인을 JSON 파일로 영구 저장/불러오기 가능한 프리셋 기능
+* **규칙 기반 시간표 (Time-scheduled)**
+  - 실시간 오디오 반응·카메라 비전 추정을 쓰지 않습니다. `grid.json` 상수 4개(BPM, 첫 박, 박자 수, 마디 수)만으로 전체 재생 시각을 수식으로 계산합니다.
+  - 동작의 **도착 시점**을 비트(8분음표)에 맞추는 것을 원칙으로, `schedule.json`의 구간 표를 하나의 전역 키프레임 타임라인으로 펼칩니다.
+* **오디오 클럭 동기화 (`heartbeat/audio.py`)**
+  - PortAudio 콜백이 알려주는 `outputBufferDacTime`(버퍼가 실제 스피커로 나가는 시각) 기준으로 "지금 귀에 들리는 음원 위치"를 추정 — 장치 출력 지연이 자동 보정됩니다.
+  - 측정값: 12초 재생 동안 벽시계 대비 편차 0.2 ms, 시뮬-클럭 어긋남 최대 2 ms.
+* **자동 안전성 검증 (`heartbeat/validate.py`)**
+  - 모든 목표 각도가 안전 범위(`motors.safe_range`) 내인지, 인접 키프레임 간 **순간 최대 속도**가 3.0 rad/s를 넘지 않는지(보간 곡선별 피크 배율 반영), 도착 시각이 8분음표 격자에 정렬되는지, 시간표 길이가 음원을 넘지 않는지를 `play.py` 실행 전 자동 검사합니다.
+  - 자가 충돌(규칙 5)은 `--headless` 전구간 시뮬레이션에서 바닥 외 접촉을 감지해 확인합니다.
+* **MuJoCo ↔ 실물 공용 로직**
+  - `choreo(t)`는 시뮬레이션과 실물 어느 쪽에서도 똑같이 쓰도록 설계되어 있습니다(Phase 6에서 `motors.py`와 연결 예정).
 
 ---
 
 ## 🚀 빠른 시작 (Quick Start)
 
-가상 시뮬레이션과 실물 로봇 중 원하는 환경을 선택하여 바로 실행할 수 있습니다.
-
-### Mode A: 가상 시뮬레이션 (Simulation)
-
 ```bash
-# 1) 웹 대시보드와 함께 시뮬레이션 실행 (헤드리스 모드)
-python src/server.py --headless
+# 1) 음원 + MuJoCo 뷰어로 재생 (기본). 스피커에서 음악이 나오고 손이 박자에 맞춰 움직입니다
+.\.venv\Scripts\python.exe src\heartbeat\play.py
 
-# 2) 브라우저에서 접속
-# http://127.0.0.1:8000
+# 2) 음원·GUI 없이 전구간(45마디) 수치 검증 — 발산/자가 충돌/추종 오차를 수 초 내 확인
+.\.venv\Scripts\python.exe src\heartbeat\play.py --headless
+
+# 3) 오디오 장치가 없을 때: 뷰어만, 실시간 클럭으로 대체
+.\.venv\Scripts\python.exe src\heartbeat\play.py --mute
 ```
 
-> **3D 뷰어(GUI)로 직접 확인하고 싶은 경우**:
-> - **macOS**: `mjpython src/run_sim.py`
-> - **Linux GUI**: `python src/run_sim.py`
-> - **WSL2 / 서버**: 디스플레이 드라이버 이슈 방지를 위해 `--headless` 권장 (`python src/run_sim.py --headless`)
+> macOS GUI 뷰어는 `mjpython`을 써야 합니다. **음원 출력·뷰어·실물 모터는 윈도우 네이티브 환경을 권장**합니다(WSL2는 디스플레이/오디오 드라이버 이슈로 `--headless` 권장).
 
-### Mode B: 실물 로봇 손 제어 (Real Robot)
+재생 구간은 안무를 분석한 **마디 1~19(음원 0.42~34.20 s)** 입니다. 마디 20~45는 영상 33초 이후 분석이 아직 없어 `schedule.json`에 비어 있으며, 구간만 추가하면 그대로 늘어납니다.
 
-U2D2를 PC에 연결하고 모터 12V 전원을 인가한 후 실행합니다.
+독립적인 관절 데모가 필요하면 안무 없이 코사인 궤적으로 오므리고 펴는 `run_sim.py`를 쓸 수 있습니다.
 
 ```bash
-# 1) 실물 연결 및 모터 상태 점검
-python real/check.py
-
-# 2) 실물 제어 서버 실행 (안전 Homing 후 대시보드 오픈)
-python real/server.py
-
-# 3) 브라우저에서 동일하게 접속하여 제어
-# http://127.0.0.1:8000
+python src/run_sim.py              # 뷰어 (macOS: mjpython src/run_sim.py)
+python src/run_sim.py --headless   # 수치만 확인 (WSL2/서버 등)
 ```
 
 ---
 
-## ✋ 손가락 움직이기: 대시보드 / 카메라
+## 🎵 비트 동기화 재생 (`heartbeat/play.py`)
 
-로봇 손가락은 두 가지 방식으로 움직일 수 있습니다. 둘 다 켜 둔 제어 서버(시뮬레이션 `src/server.py` 또는 실물 `real/server.py`)에 관절 목표 각도를 보내므로, 서버만 바꾸면 같은 방식으로 가상 손과 실물 손을 모두 움직입니다.
+### 동기화 구조
+1. **마스터 클럭은 오디오 스트림 하나뿐**입니다(`AudioClock.t`). 재생된 샘플 수와 DAC 콜백 시각으로 "지금 귀에 들리는 음원 위치"를 계산합니다.
+2. 목표 자세는 전부 `choreo(t)`로 계산합니다. 누적되는 상태가 없어 **오차가 쌓이지 않습니다.**
+3. 물리 스텝이 클럭을 따라갑니다(catch-up). 0.25 s 넘게 밀리면 스텝으로 메우지 않고 시각을 바로 맞춥니다.
 
-| 방식 | 조작 | 실행 |
+### 보정 상수 (`play.py` 상단)
+
+| 상수 | 값 | 의미 / 언제 바꾸나 |
 |---|---|---|
-| **대시보드** | 웹 화면에서 관절 각도를 입력하거나 프리셋 적용 | 서버 실행 후 `http://127.0.0.1:8000` 접속 |
-| **카메라** | 웹캠 앞에서 사람 손을 움직이면 로봇 손가락이 따라 움직임 | 서버 실행 후 `python src/teleop.py` |
-
-### 카메라 방식 실행
+| `LEAD` | 0.050 s | 위치 제어기(kp=12, kv=0.5) 추종 지연 보정. `--headless` 추종 오차가 0.05 rad 넘을 때 `--lead`로 재탐색 |
+| `AUDIO_OFFSET` | 0.0 s | **귀로 맞추는 값.** 손이 음악보다 늦으면 음수, 빠르면 양수. `--offset` 옵션 |
+| `VIDEO_OFFSET` | 0.966 s | 영상↔음원 상호상관으로 측정(문서/주석용, 재생에는 미사용) |
 
 ```bash
-# 1) 제어 서버 실행 (둘 중 하나)
-python src/server.py          # 시뮬레이션 (macOS 뷰어: mjpython src/server.py)
-python real/server.py         # 실물
+# LEAD를 바꿔 가며 추종 오차 비교
+.\.venv\Scripts\python.exe src\heartbeat\play.py --headless --lead 0.08
 
-# 2) 다른 터미널에서 카메라 조종 실행
-python src/teleop.py                 # 기본 웹캠(0번)
-python src/teleop.py --source 1      # 다른 카메라
-python src/teleop.py --source a.mp4  # 동영상 파일
+# 손이 반 박(222 ms) 늦게 보일 때
+.\.venv\Scripts\python.exe src\heartbeat\play.py --offset -0.10
 ```
 
-- 처음 실행할 때 MediaPipe 손 인식 모델(`src/models/hand_landmarker.task`)을 자동으로 내려받습니다.
-- macOS에서는 처음 실행할 때 터미널 앱의 카메라 권한을 허용해야 합니다.
-- 미리보기 창에 인식한 손 관절점, 관절별 목표 각도, 엄지 벌림 각도(`thumb spread`)가 표시됩니다. `q`를 누르면 종료합니다.
+### 모션/시간표 점검
 
-### 실물 손을 카메라로 조종하는 전체 순서
+```bash
+# 45마디 격자 시각 출력
+.\.venv\Scripts\python.exe src\heartbeat\grid.py
 
-1. **하드웨어 연결**: 모터 12V 전원을 켜고 U2D2를 PC에 연결합니다.
-2. **캘리브레이션**: [실물 하드웨어 연결 및 캘리브레이션 가이드](#-실물-하드웨어-연결-및-캘리브레이션-가이드)의 1~3단계로 모터 응답, 영점(`zero`), 회전 방향(`sign`)을 확인합니다. 한 번 맞춰 두면 하드웨어가 바뀌기 전까지 다시 할 필요가 없습니다.
-3. **실물 제어 서버 실행**: 전 관절 토크가 켜지고 0 rad 자세로 천천히 정렬됩니다.
-   ```bash
-   python real/server.py
-   ```
-4. **카메라 조종 실행** (다른 터미널): 웹캠 앞에서 손을 움직이면 실물 손가락이 따라 움직입니다.
-   ```bash
-   python src/teleop.py
-   ```
-5. **종료**: 미리보기 창에서 `q`로 카메라 조종을 끈 뒤, 서버 터미널에서 `Ctrl+C`를 누르면 모든 모터 토크가 꺼집니다.
+# 마디별 배정 동작 표 + 전체 키프레임 수
+.\.venv\Scripts\python.exe src\heartbeat\schedule.py
 
-### 사람 손 → 로봇 손 대응
+# choreo(t) 미리보기 (마디 1~20, 각 박 0·2에서의 7관절 각도)
+.\.venv\Scripts\python.exe src\heartbeat\choreo.py
 
-사람 손은 손가락 5개, 로봇 손은 3개이므로 엄지 굽힘과 새끼손가락은 쓰지 않습니다.
+# 안전 범위·속도 상한·격자 정렬·길이 검증 (play.py가 실행 전 자동 호출)
+.\.venv\Scripts\python.exe src\heartbeat\validate.py
+```
 
-| 사람 손 동작 | 로봇 관절 | 움직이는 범위 |
-|---|---|---|
-| 검지 첫째 마디 굽힘 | `A_j1` | 펼침 0 ~ 오므림 0.3 rad |
-| 검지 나머지 두 마디 굽힘의 합 | `A_j2` | 펼침 0 ~ 오므림 1.2 rad |
-| 중지 첫째 마디 / 나머지 두 마디 | `B_j1` / `B_j2` | 위와 같음 |
-| 약지 첫째 마디 / 나머지 두 마디 | `C_j1` / `C_j2` | 위와 같음 |
-| 엄지 좌우 벌림 (검지에 붙임 ↔ 최대로 벌림) | `A_j0` | −1.0472 ~ +1.0472 rad (±60°) |
+---
 
-- **굽힘**: 사람 관절의 굽힘을 0(펼침)~1(최대 굽힘)로 바꾼 뒤, 오므림 방향(A는 −, B/C는 +)으로 `run_sim.Q_CLOSE`(j1 0.3 rad, j2 1.2 rad)를 곱합니다.
-- **엄지 좌우**: 엄지 뿌리 뼈가 손바닥 면에서 손목→검지 뿌리 선과 벌어진 각도를 잽니다. 손을 기울이거나 다른 손가락을 굽혀도 값이 바뀌지 않습니다. 반영 배율은 `run_sim.YAW_GAIN`(데모 진폭 0.25 rad의 5배)이며, `A_j0` 관절 한계(±60°)에서 멈춥니다.
-- 각도는 MediaPipe의 3D 관절점(손 중심 기준, m 단위)으로 재므로 카메라와의 거리와 무관합니다.
+## 🎛 안무 커스터마이징
 
-### 안전 동작
+- **`src/heartbeat/motions.json`** — 동작별 키프레임. `q`는 **0~1 정규화 오므림량**(0=펼침, 1=`Q_CLOSE` 최대), `A_j0`만 rad. 키프레임에 적지 않은 관절은 직전 값을 유지합니다.
+- **`src/heartbeat/schedule.json`** — 어느 마디 구간에 어느 동작을 쓸지, `fill.every`로 N마디마다 끼워 넣을 동작, 마디 첫 박 악센트 배율(`accent_first_beat_scale`) 등을 정의합니다.
+- 고친 뒤에는 반드시 `validate.py`를 돌려 안전 범위·속도 상한 위반을 **어느 키프레임인지까지** 확인하세요.
 
-- 목표 각도를 부드럽게 바꾸고(지수 평활), 바뀌는 속도를 3 rad/s 이하로 제한합니다 (XL430 기본 속도 한계 6.36 rad/s의 절반 이하).
-- 손이 화면에서 사라지면 목표를 보내지 않으므로 로봇은 마지막 자세를 유지합니다.
-- 엄지를 손바닥 면에서 약 60° 넘게 들어 올리면 좌우 방향을 믿을 수 없어 `A_j0`는 마지막 값을 유지합니다.
-- 서버가 목표를 거절하면(예: 토크가 꺼진 관절, 409) 미리보기 창에 이유가 표시됩니다.
-- 세 손가락을 80% 이상 오므리면(엄지를 크게 벌리면 50%부터) 시뮬레이션에서 A 손가락 끝이 B·C 끝에 닿습니다 ([#7](https://github.com/ajin-robot-hand/tri_hand_mujoco/issues/7)). 실물에서는 처음에 천천히 주먹을 쥐어 확인하세요.
-
-### 내 손에 맞추기
-
-사람마다 손가락이 굽는 정도가 달라서, 로봇이 끝까지 펴지거나 오므려지지 않으면 `src/teleop.py` 상단 값을 조정합니다.
-
-| 값 | 뜻 | 조정 방법 |
-|---|---|---|
-| `HUMAN_RANGE` | 손가락별 사람 굽힘 각도 범위 [펼침, 최대 굽힘] (rad) | 끝까지 안 펴지면 첫째 값↑, 끝까지 안 오므려지면 둘째 값↓ |
-| `THUMB_RANGE` | 엄지 벌림 각도 [검지에 붙임, 최대로 벌림] (rad) | 미리보기의 `thumb spread` 값을 두 자세에서 읽어 입력 |
-| `THUMB_SIGN` | 엄지를 벌릴 때 `A_j0` 회전 방향 | 반대로 돌면 `-1.0` |
+> ⚠ 속도 검사는 평균이 아니라 **순간 최대 속도**로 합니다. `ease="out"`은 출발 기울기가 평균의 3배라 8분음표(222 ms) 구간에 쓰면 상한 3.0 rad/s를 넘깁니다. 짧은 구간에는 `inout`을 쓰세요. 자세한 설계 기록은 [docs/heartbeat/choreography.md](docs/heartbeat/choreography.md) 4장 참조.
 
 ---
 
 ## 🛠 환경 세팅 (Setup)
 
-권장 파이썬 버전은 **Python 3.10**이며, 빠르고 격리된 환경 구축을 위해 [`uv`](https://github.com/astral-sh/uv) 사용을 권장합니다.
+가상환경(`.venv`)의 바이너리를 직접 사용합니다.
 
 ```bash
-# 1) uv 설치 (설치되어 있지 않은 경우)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-source ~/.local/bin/env
+# 1) 가상환경 생성 (최초 1회)
+python -m venv .venv
 
-# 2) Python 3.10 가상환경 생성 및 활성화
-uv python install 3.10
-uv venv ~/mujoco_env --python 3.10
-source ~/mujoco_env/bin/activate
-
-# 3) 의존성 패키지 설치
-uv pip install -r requirements.txt
+# 2) 의존성 설치
+# Windows
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+# Linux/macOS
+.venv/bin/python -m pip install -r requirements.txt
 ```
 
-<details>
-<summary><b>기타 OS별 참고 사항</b></summary>
+> **주요 설치 패키지 (`requirements.txt`)**:
+> - `mujoco==3.3.0`, `numpy`: 물리 엔진 및 행렬 연산
+> - `dynamixel-sdk`: 실물 Dynamixel 모터 시리얼 통신 (Phase 6용)
+> - `sounddevice`, `soundfile`: 오디오 재생 마스터 클럭 및 mp3 디코딩 (ffmpeg 불필요)
+> - `pytest`: 유닛 테스트
 
-* **Linux (Ubuntu/Debian) `apt` 사용 시**:
-  ```bash
-  sudo apt update && sudo apt install -y python3.10 python3.10-venv
-  python3.10 -m venv ~/mujoco_env
-  source ~/mujoco_env/bin/activate
-  pip install -r requirements.txt
-  ```
-* **macOS (Homebrew)**:
-  `brew install python@3.10` 후 동일하게 가상환경을 생성합니다. MuJoCo GUI 창을 띄울 때는 macOS의 스레드 특성상 `mjpython`을 사용해야 합니다.
-* **Windows (WSL2)**:
-  Windows 호스트가 아닌 **WSL2(Ubuntu)** 내부에서 위 `uv` 가이드대로 설치합니다. 실물 U2D2 연결 시 `usbipd`를 통해 USB 포트를 WSL2에 바인딩해야 `/dev/ttyUSB*`로 인식됩니다.
-</details>
+영상/음원에서 안무를 새로 분석하거나 비트 격자를 다시 맞출 때만 추가 의존성(`requirements-analysis.txt`: `librosa`, `matplotlib`, `opencv-python` 등)이 필요합니다. **재생(`play.py`)에는 전혀 필요 없습니다.**
+
+```bash
+pip install -r requirements.txt -r requirements-analysis.txt
+```
 
 ---
 
-## 🤖 실물 하드웨어 연결 및 캘리브레이션 가이드
+## 🤖 실물 로봇 손 연동 (`motors.py`)
 
-실물 로봇 손의 모터 ID, 통신 속도, 회전 방향(`sign`), 영점(`zero`)은 [`real/config.json`](file:///home/erdos/workspace/tri-hand/real/config.json)에서 관리합니다.
+`src/motors.py`는 이전 프로젝트에서 쓰던 실물 Dynamixel(XL430-W250-T, Protocol 2.0, 위치 제어) 드라이버를 그대로 재사용합니다. **Heartbeat 재생을 실물로 이식하는 작업(Phase 6)은 아직 미착수**이며, 현재는 캘리브레이션/수동 점검 기능만 제공합니다.
 
-### 캘리브레이션 5단계
+```bash
+# 토크를 끈 채로 손으로 관절을 움직여 motors.json 작성
+python src/motors.py calibrate --port COM3 --baud 1000000
 
-1. **하드웨어 연결 및 자동 스캔**
-   모터 전원(12V)과 U2D2를 연결하고 실행합니다. 응답이 없는 모터가 있으면 자동으로 전 보레이트(57600 ~ 4000000)를 스캔합니다.
-   ```bash
-   python real/check.py
-   ```
-2. **영점(zero) 및 회전 방향(sign) 확인**
-   손가락을 손으로 천천히 움직여 각 관절의 ID 배정과 0점 tick을 확인합니다.
-   ```bash
-   python real/check.py --watch
-   ```
-   - 손가락을 완전히 편 상태(0 rad)의 tick 값을 `real/config.json`의 `zero`에 입력합니다 (기본 2048).
-   - 오므림 회전 시 tick이 감소하면 `sign: -1`로 반전시킵니다. (오므림 기준: A는 음수, B/C는 양수)
-3. **설정 무결성 재점검**
-   ```bash
-   python real/check.py
-   ```
-   모든 모터가 정상 응답하고 "관절 범위 밖" 경고가 없는지 확인합니다.
-4. **실물 제어 서버 구동**
-   ```bash
-   python real/server.py
-   ```
-   서버 시작 시 전 관절 토크가 켜지며 0.5 rad/s 속도로 안전하게 0 rad 위치로 정렬됩니다. (`--no-home` 옵션으로 생략 가능)
-   대시보드(`http://127.0.0.1:8000`)에서 관절을 하나씩 조작하며 동작을 확인합니다.
-5. **종료**
-   `Ctrl+C`를 누르면 모든 모터의 토크가 안전하게 꺼지며 종료됩니다.
+# 토크 끈 채로 현재 관절 각도(rad)를 실시간 출력 (부호 확인용)
+python src/motors.py check --config src/motors.json
+```
 
----
-
-## 🖥 웹 대시보드 & 프리셋 제어 상세
-
-`src/server.py`(시뮬레이션)와 `real/server.py`(실물)는 같은 대시보드([src/dashboard.html](file:///home/erdos/workspace/tri-hand/src/dashboard.html))를 통해 다음 기능을 제공합니다.
-
-* **실시간 모니터링**: 7개 모터(`A_j0`, `A_j1`, `A_j2`, `B_j1`, `B_j2`, `C_j1`, `C_j2`)의 현재 각도, 목표 각도, 속도, 토크, 게인 값 표출
-* **원격 LAN 접속**: `--host 0.0.0.0`으로 실행 시 동일 공유기(LAN) 내의 다른 기기/태블릿에서 `http://<호스트IP>:8000`으로 접속 제어 가능
-* **프리셋 시스템**:
-  1. 원하는 각도 및 게인을 입력하고 이름을 지정해 프리셋으로 저장 (시뮬레이션: `src/presets.json`, 실물: `real/presets.json`)
-  2. 드롭다운에서 프리셋 선택 후 **적용**을 누르면 전 관절에 일괄 반영
-
-### 입력 허용 범위 및 제어 스펙
-
-| 항목 | 허용 범위 | 비고 |
-|---|---|---|
-| **목표 각도** | `A_j0`: ±1.0472 rad (±60°)<br>`A_j1~2, B_j1~2, C_j1~2`: ±1.5708 rad (±90°) | 관절 기구학 동작 범위 (`ctrlrange`) |
-| **kp (P 게인)** | 0 초과 ~ 100 | 실물은 XL430 Position P Gain 레지스터 직접 매핑 |
-| **kv (D 게인)** | 0 ~ 5 | 실물은 XL430 Position D Gain 레지스터 직접 매핑 |
-| **토크 한계** | 0 초과 ~ 1.4 N·m | XL430-W250-T 정격 토크 기준 |
+- 영점/방향 추측 없이 손으로 직접 움직여 기록합니다: `raw(틱) = zero + sign × q(rad) × 4096/2π`.
+- 목표는 항상 안전 범위(`safe_range`: 펼침 0 ~ `Q_CLOSE`, `A_j0`는 ±`YAW_LIMIT`)로 잘라서 전송되고, 이동 속도는 Profile Velocity로 3.0 rad/s 이하로 제한됩니다.
+- 모터 보레이트를 모를 때는 `calibrate`가 전 보레이트(57600~4000000)를 자동 스캔합니다.
+- 향후 `play.py --motors` 추가 시 박 경계마다 `choreo(next_beat)`를 Time-based Profile로 Sync Write하는 방식이 계획되어 있습니다(`MOTORS_LEAD` 상수 측정 필요). 자세한 계획은 [docs/heartbeat/implementation-plan.md](docs/heartbeat/implementation-plan.md) Phase 6 참조.
 
 ---
 
@@ -276,6 +207,9 @@ uv pip install -r requirements.txt
 * **오므림(Grasp/Close) 회전 부호 규칙**:
   - **Finger A (상단 3자유도)**: 음수(`-`) 방향 회전이 오므림
   - **Finger B, C (하단 2자유도)**: 양수(`+`) 방향 회전이 오므림
+* **안전 가동 범위**: `j1` 0.0~0.3 rad, `j2` 0.0~1.2 rad, `A_j0` ±1.0472 rad, 관절 속도 상한 3.0 rad/s
+
+세부 모델링 원칙(시각/충돌 지오메트리 분리, 자가 충돌 방지 등)은 [AGENTS.md](AGENTS.md)를 참조하세요.
 
 ---
 
@@ -283,26 +217,32 @@ uv pip install -r requirements.txt
 
 ```
 tri_hand/
-├── docs/               # 이론 배경 학습 자료 및 데모 미디어
-├── src/                # [가상 시뮬레이션] 모델 및 제어 환경
-│   ├── scene.xml       # 전체 시뮬레이션 씬 (바닥, 조명 등)
-│   ├── hand.xml        # 로봇 손 기구학/동역학 MuJoCo 모델
-│   ├── meshes/         # 3D STL 메쉬 파일
-│   ├── run_sim.py      # MuJoCo 뷰어 실행 스크립트
-│   ├── server.py       # 시뮬레이션 HTTP 제어 서버
-│   ├── teleop.py       # 카메라 원격 조종 (웹캠 → 관절 목표, Sim / Real 공용)
-│   └── dashboard.html  # 통합 웹 대시보드 (Sim / Real 공용)
-├── real/               # [실물 로봇 제어] U2D2 + XL430 하드웨어 환경
-│   ├── config.json     # 모터 ID, 통신 속도, zero, sign, 관절 범위 설정
-│   ├── config.py       # 하드웨어 설정 로더 및 유효성 검증
-│   ├── dxl.py          # Dynamixel SDK 래퍼 (tick ↔ rad 변환)
-│   ├── check.py        # 하드웨어 무결성 점검 / 보레이트 스캔 / 각도 모니터
-│   └── server.py       # 실물 로봇 HTTP 제어 서버 (대시보드 공용)
-├── tests/              # API 및 제어 로직 유닛 테스트 (pytest)
-├── tutorial/           # MuJoCo 모델링 기초 단계별 실습 예제
-├── AGENTS.md           # 에이전트 작업 지침 및 하드웨어 모델링 원칙
-├── requirements.txt    # 크로스 플랫폼 의존성 목록
-└── README.md           # 프로젝트 안내서
+├── docs/
+│   ├── mujoco.gif              # 시뮬레이션 데모
+│   ├── execution_guide.md      # 실행 가이드
+│   └── heartbeat/
+│       ├── Heartbeat.mp3       # 재생 음원
+│       ├── heartbeat.mp4       # 안무 분석 원본 영상 (실행에는 미사용)
+│       ├── brainstorming.md    # 배경·제약 정리
+│       ├── choreography.md     # 영상 분석 → 모션 매핑 근거
+│       └── implementation-plan.md  # Phase별 구현 계획
+├── src/
+│   ├── scene.xml / hand.xml    # MuJoCo 기구학/동역학 모델
+│   ├── meshes/                 # 3D STL 메쉬 파일
+│   ├── run_sim.py              # 독립 시뮬레이션 데모 (코사인 궤적)
+│   ├── motors.py / motors.json # 실물 Dynamixel 드라이버 및 캘리브레이션 설정
+│   └── heartbeat/
+│       ├── grid.json / grid.py       # 비트 격자 상수 및 시각 변환
+│       ├── motions.json / choreo.py  # 동작 키프레임 정의 및 choreo(t)
+│       ├── schedule.json / schedule.py  # 구간 표 및 전역 타임라인
+│       ├── validate.py         # 재생 전 안전성 자동 검증
+│       ├── audio.py            # 오디오 마스터 클럭 (AudioClock / SilentClock)
+│       └── play.py             # 재생 진입점
+├── tests/                      # pytest 유닛 테스트
+├── AGENTS.md                   # 에이전트 작업 지침 및 하드웨어 모델링 원칙
+├── requirements.txt            # 재생에 필요한 의존성
+├── requirements-analysis.txt   # 안무 분석(영상/음원)에만 필요한 의존성
+└── README.md
 ```
 
 ---
@@ -310,6 +250,7 @@ tri_hand/
 ## 🧪 테스트 실행
 
 ```bash
-pip install pytest httpx
-python -m pytest tests
+.\.venv\Scripts\python.exe -m pytest tests/
 ```
+
+`tests/test_heartbeat.py`는 음원·GUI·실물 없이 격자 변환, `choreo(t)`, 시간표 검증 규칙을 모두 검사하며, `tests/test_motors.py`는 가짜 시리얼 버스로 Dynamixel 드라이버의 안전 범위/부호 로직을 검사합니다.

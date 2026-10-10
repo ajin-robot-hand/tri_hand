@@ -1,8 +1,10 @@
 # Heartbeat audio analysis dependencies (NOT needed for playback)
 # Install: pip install -r requirements.txt -r requirements-analysis.txt
-# ffmpeg/ffprobe 불필요: soundfile이 mp3 직접 디코딩, opencv 불필요: 영상은 실행에 사용 안 함
+# 재생(play.py)에는 전혀 필요 없다. 영상에서 안무를 읽고 음원 격자를 맞출 때만 쓴다.
 
 librosa>=0.10
 numba>=0.61        # supports numpy 2.2 (compatible with numpy<=2.2.4 in requirements.txt)
 soundfile
 matplotlib
+imageio-ffmpeg     # heartbeat.mp4 오디오 트랙 추출 (영상↔음원 정렬 측정용). 재생에는 불필요
+opencv-python      # heartbeat.mp4 프레임 추출 (안무 관찰용). 재생에는 불필요

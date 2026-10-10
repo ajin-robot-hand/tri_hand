@@ -10,6 +10,7 @@
 3. [가상 시뮬레이션 실행](#3-가상-시뮬레이션-실행)
    - [3.1 독립 시뮬레이션 데모 (`run_sim.py`)](#31-독립-시뮬레이션-데모-run_simpy)
    - [3.2 HTTP 제어 서버 및 웹 대시보드 (`server.py`)](#32-http-제어-서버-및-웹-대시보드-serverpy)
+   - [3.3 음원 동기 비트 연출 (`heartbeat/play.py`)](#33-음원-동기-비트-연출-heartbeatplaypy)
 4. [카메라 기반 손 원격 조종 (`teleop.py`)](#4-카메라-기반-손-원격-조종-teleoppy)
    - [4.1 관절 매핑 및 동작 원리](#41-관절-매핑-및-동작-원리)
    - [4.2 시뮬레이션 연동 실행](#42-시뮬레이션-연동-실행)
@@ -144,6 +145,75 @@ curl -X POST http://localhost:8000/grasp \
 # 시뮬레이션 자세 초기화
 curl -X POST http://localhost:8000/reset
 ```
+
+---
+
+### 3.3 음원 동기 비트 연출 (`heartbeat/play.py`)
+`docs/heartbeat/Heartbeat.mp3`를 재생하면서, 영상(`heartbeat.mp4`) 0~33초 구간의 안무를 옮긴
+모션을 135 BPM 박자에 맞춰 시뮬레이션에서 재생합니다. 재생 범위는 **마디 1~19 (음원 0.42~34.20 s)** 입니다.
+
+안무를 어떻게 읽어 모션으로 옮겼는지는 [heartbeat/choreography.md](heartbeat/choreography.md) 참조.
+
+#### 기본 실행 명령어
+```bash
+# 1) 음원 + 뷰어 (기본). 스피커에서 음악이 나오고 손이 박자에 맞춰 움직입니다
+.\.venv\Scripts\python.exe src\heartbeat\play.py
+
+# 2) 음원·GUI 없이 전구간 수치 검증 (빠름, 수 초)
+.\.venv\Scripts\python.exe src\heartbeat\play.py --headless
+
+# 3) 오디오 장치가 없을 때 뷰어만 (실시간 클럭으로 대체)
+.\.venv\Scripts\python.exe src\heartbeat\play.py --mute
+```
+
+> macOS는 GUI 뷰어에 `mjpython`을 써야 합니다. 음원 출력·뷰어·실물 모터는 **윈도우 네이티브** 환경을 권장합니다(WSL2 아님).
+
+#### 동기화 구조
+1. **마스터 클럭은 오디오 스트림 하나뿐**입니다. PortAudio가 콜백마다 알려주는 `outputBufferDacTime`
+   (그 버퍼가 스피커로 나가는 시각)으로 "지금 귀에 들리는 음원 위치"를 계산합니다.
+   출력 장치 지연(MME 기준 91 ms)이 여기서 자동으로 보정됩니다.
+2. 목표 자세는 전부 `choreo(t)`로 계산합니다. 누적되는 상태가 없어 **오차가 쌓이지 않습니다.**
+3. 물리 스텝이 클럭을 따라갑니다. 0.25 s 넘게 밀리면 스텝으로 메우지 않고 시각을 바로 맞춥니다.
+
+측정값: 12초 재생 동안 오디오 클럭의 벽시계 대비 편차 **0.2 ms**, 시뮬-클럭 어긋남 최대 **2 ms**.
+
+#### 보정 상수 (`play.py` 상단)
+| 상수 | 값 | 언제 바꾸나 |
+|---|---|---|
+| `LEAD` | 0.050 s | `--headless` 추종 오차가 0.05 rad을 넘을 때. `--lead` 옵션으로 즉시 실험 가능 |
+| `AUDIO_OFFSET` | 0.0 s | **귀로 맞추는 값.** 손이 음악보다 늦으면 음수, 빠르면 양수. `--offset` 옵션 |
+
+```bash
+# LEAD를 바꿔 가며 추종 오차 비교
+.\.venv\Scripts\python.exe src\heartbeat\play.py --headless --lead 0.08
+
+# 손이 반 박(222 ms) 늦게 보일 때
+.\.venv\Scripts\python.exe src\heartbeat\play.py --offset -0.10
+```
+
+#### 모션/시간표 점검
+```bash
+# 45마디 격자 시각 출력
+.\.venv\Scripts\python.exe src\heartbeat\grid.py
+
+# 마디별 배정 동작 표
+.\.venv\Scripts\python.exe src\heartbeat\schedule.py
+
+# 안전 범위·속도 상한·격자 정렬·길이 검증 (play.py가 실행 전 자동 호출)
+.\.venv\Scripts\python.exe src\heartbeatalidate.py
+
+# 단위 테스트
+.\.venv\Scripts\python.exe -m pytest tests	est_heartbeat.py -q
+```
+
+#### 안무를 고치고 싶을 때
+- `src/heartbeat/motions.json` — 동작별 키프레임. `q`는 0~1 정규화 오므림량(0=펼침, 1=`Q_CLOSE`),
+  `A_j0`만 rad. 적지 않은 관절은 직전 값을 유지합니다.
+- `src/heartbeat/schedule.json` — 어느 마디에 어느 동작을 쓸지.
+- 고친 뒤 `validate.py`를 돌리면 안전 범위·속도 상한 위반을 **어느 키프레임인지까지** 짚어 줍니다.
+
+> ⚠ 속도 검사는 평균이 아니라 **순간 최대 속도**로 합니다. `ease="out"`은 출발 기울기가 평균의 3배라
+> 8분음표(222 ms) 구간에 쓰면 상한 3.0 rad/s를 넘깁니다. 짧은 구간에는 `inout`을 쓰세요.
 
 ---
 

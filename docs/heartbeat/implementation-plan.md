@@ -4,7 +4,11 @@
 >
 > 기준 확정값: BPM 135, first_downbeat 0.422s, 45마디, 1마디 = 1.77778s
 >
-> 읽는 순서: 이 문서 → `brainstorming.md`(배경·제약) → 각 Phase 착수
+> 읽는 순서: 이 문서 → `brainstorming.md`(배경·제약) → `choreography.md`(영상 분석 근거) → 각 Phase 착수
+>
+> **구현 현황 (2026-10-10)**: Phase 0~5 완료. 단, 재생 범위는 영상을 분석한 **마디 1~19(음원 34.2 s)** 까지다.
+> 마디 20~45는 영상 33초 이후 구간이라 `schedule.json`에 비어 있다 — 구간만 추가하면 그대로 늘어난다.
+> Phase 6(실물 이식)은 미착수.
 
 ---
 
@@ -536,6 +540,7 @@ Phase 2는 동작 A~E 표가 없으면 임시 플레이스홀더(A=j2 까딱임,
 
 | 상수 | 파일 | 확정 시점 | 값 |
 |---|---|---|---|
-| `LEAD` | `play.py` | Phase 4 | 미정 |
-| `AUDIO_OFFSET` | `play.py` | Phase 5 | 미정 |
+| `LEAD` | `play.py` | Phase 4 ✅ | **0.050 s** (0~0.13 s 스윕, 추종 오차 0.027 rad 최소점) |
+| `AUDIO_OFFSET` | `play.py` | Phase 5 ✅ | **0.0 s** (장치 지연은 `outputBufferDacTime`이 보정. 귀로 재조정하는 값) |
+| `VIDEO_OFFSET` | `play.py` | Phase 2 ✅ | **0.966 s** (`mp3_t = video_t + 0.966`. 문서용, 재생에는 미사용) |
 | `MOTORS_LEAD` | `play.py` | Phase 6 | 미정 |
