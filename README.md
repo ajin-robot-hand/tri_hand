@@ -224,6 +224,7 @@ uv pip install -r requirements.txt
    ```
 2. **영점(zero) 및 회전 방향(sign) 확인**
    손가락을 손으로 천천히 움직여 각 관절의 ID 배정과 0점 tick을 확인합니다.
+   ID와 `sign`은 `python real/calibrate.py`로 관절을 하나씩 손으로 굽혀 자동으로 찾을 수 있습니다 (`zero`는 `python real/center.py --apply`).
    ```bash
    python real/check.py --watch
    ```
