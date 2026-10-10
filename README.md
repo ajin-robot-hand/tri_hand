@@ -76,13 +76,13 @@ play.py          AudioClock(재생 샘플 수 기준)을 마스터 클럭으로 
 
 ```bash
 # 1) 음원 + MuJoCo 뷰어로 재생 (기본). 스피커에서 음악이 나오고 손이 박자에 맞춰 움직입니다
-.\.venv\Scripts\python.exe src\heartbeat\play.py
+python src/heartbeat/play.py
 
 # 2) 음원·GUI 없이 전구간(45마디) 수치 검증 — 발산/자가 충돌/추종 오차를 수 초 내 확인
-.\.venv\Scripts\python.exe src\heartbeat\play.py --headless
+python src/heartbeat/play.py --headless
 
 # 3) 오디오 장치가 없을 때: 뷰어만, 실시간 클럭으로 대체
-.\.venv\Scripts\python.exe src\heartbeat\play.py --mute
+python src/heartbeat/play.py --mute
 ```
 
 > macOS GUI 뷰어는 `mjpython`을 써야 합니다. **음원 출력·뷰어·실물 모터는 윈도우 네이티브 환경을 권장**합니다(WSL2는 디스플레이/오디오 드라이버 이슈로 `--headless` 권장).
@@ -115,26 +115,26 @@ python src/run_sim.py --headless   # 수치만 확인 (WSL2/서버 등)
 
 ```bash
 # LEAD를 바꿔 가며 추종 오차 비교
-.\.venv\Scripts\python.exe src\heartbeat\play.py --headless --lead 0.08
+python src/heartbeat/play.py --headless --lead 0.08
 
 # 손이 반 박(222 ms) 늦게 보일 때
-.\.venv\Scripts\python.exe src\heartbeat\play.py --offset -0.10
+python src/heartbeat/play.py --offset -0.10
 ```
 
 ### 모션/시간표 점검
 
 ```bash
 # 45마디 격자 시각 출력
-.\.venv\Scripts\python.exe src\heartbeat\grid.py
+python src/heartbeat/grid.py
 
 # 마디별 배정 동작 표 + 전체 키프레임 수
-.\.venv\Scripts\python.exe src\heartbeat\schedule.py
+python src/heartbeat/schedule.py
 
 # choreo(t) 미리보기 (마디 1~20, 각 박 0·2에서의 7관절 각도)
-.\.venv\Scripts\python.exe src\heartbeat\choreo.py
+python src/heartbeat/choreo.py
 
 # 안전 범위·속도 상한·격자 정렬·길이 검증 (play.py가 실행 전 자동 호출)
-.\.venv\Scripts\python.exe src\heartbeat\validate.py
+python src/heartbeat/validate.py
 ```
 
 ---
@@ -151,23 +151,17 @@ python src/run_sim.py --headless   # 수치만 확인 (WSL2/서버 등)
 
 ## 🛠 환경 세팅 (Setup)
 
-가상환경(`.venv`)의 바이너리를 직접 사용합니다.
+가상환경이 활성화된 상태에서 의존성을 설치합니다.
 
 ```bash
-# 1) 가상환경 생성 (최초 1회)
-python -m venv .venv
-
-# 2) 의존성 설치
-# Windows
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-# Linux/macOS
-.venv/bin/python -m pip install -r requirements.txt
+pip install -r requirements.txt
 ```
 
 > **주요 설치 패키지 (`requirements.txt`)**:
 > - `mujoco==3.3.0`, `numpy`: 물리 엔진 및 행렬 연산
 > - `dynamixel-sdk`: 실물 Dynamixel 모터 시리얼 통신 (Phase 6용)
 > - `sounddevice`, `soundfile`: 오디오 재생 마스터 클럭 및 mp3 디코딩 (ffmpeg 불필요)
+>   - *참고 (Linux 환경)*: 음원 출력을 위해 PortAudio 라이브러리가 필요합니다. (`conda install -c conda-forge portaudio` 또는 `sudo apt-get install libportaudio2`). 설치 없이 실행하려면 `--mute` 또는 `--headless` 옵션을 사용합니다.
 > - `pytest`: 유닛 테스트
 
 영상/음원에서 안무를 새로 분석하거나 비트 격자를 다시 맞출 때만 추가 의존성(`requirements-analysis.txt`: `librosa`, `matplotlib`, `opencv-python` 등)이 필요합니다. **재생(`play.py`)에는 전혀 필요 없습니다.**
@@ -250,7 +244,7 @@ tri_hand/
 ## 🧪 테스트 실행
 
 ```bash
-.\.venv\Scripts\python.exe -m pytest tests/
+pytest tests/
 ```
 
 `tests/test_heartbeat.py`는 음원·GUI·실물 없이 격자 변환, `choreo(t)`, 시간표 검증 규칙을 모두 검사하며, `tests/test_motors.py`는 가짜 시리얼 버스로 Dynamixel 드라이버의 안전 범위/부호 로직을 검사합니다.

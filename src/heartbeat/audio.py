@@ -18,6 +18,7 @@ class AudioClock:
 
     def __init__(self, path, offset: float = 0.0, stop_at: float | None = None,
                  fade: float = 0.5):
+        import sounddevice as _sd         # PortAudio 및 오디오 백엔드 라이브러리 가용 여부 사전 검증
         self.data, self.sr = sf.read(str(path), dtype="float32", always_2d=True)
         self.offset = offset              # AUDIO_OFFSET: 측정으로 보정하는 상수(s)
         self.fade = fade                  # 끝에서 페이드아웃할 길이(s)

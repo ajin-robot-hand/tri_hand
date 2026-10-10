@@ -135,7 +135,12 @@ def run_viewer(model, data, clock, lead: float = LEAD) -> None:
                                       show_right_ui=False) as v:
         v.cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
         v.cam.fixedcamid = model.camera("iso").id
-        clock.start()
+        try:
+            clock.start()
+        except Exception as e:
+            print(f"  ⚠ 오디오 스트림을 시작할 수 없어 무음으로 전환합니다: {e}", file=sys.stderr)
+            clock = SilentClock(offset=getattr(clock, "offset", 0.0), stop_at=getattr(clock, "stop_at", None))
+            clock.start()
         bar = 0
         while v.is_running():
             t = clock.t
