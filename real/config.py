@@ -1,5 +1,6 @@
 """config.json 읽기와 검증. 실물 배선이 바뀌면 config.json만 고치고 check.py로 확인."""
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -52,3 +53,14 @@ def validate(cfg: Config) -> list[str]:
         if len(j.range) != 2 or not j.range[0] < j.range[1]:
             errors.append(f"{n}: range는 [하한, 상한] 이어야 함 ({list(j.range)})")
     return errors
+
+
+def update(path: Path, values: dict[str, dict[str, int]]):
+    """config.json의 정수 값만 바꿈. 예: {"A_j1": {"id": 5, "sign": -1}}. 한 줄에 관절 하나인 기존 형식을 유지."""
+    text = Path(path).read_text(encoding="utf-8")
+    for n, fields in values.items():
+        for key, v in fields.items():
+            text, count = re.subn(rf'("{n}":\s*{{[^}}]*"{key}":\s*)-?\d+', rf"\g<1>{v}", text)
+            if count != 1:
+                raise ValueError(f"{path}에서 {n}의 {key}를 찾지 못함")
+    Path(path).write_text(text, encoding="utf-8")

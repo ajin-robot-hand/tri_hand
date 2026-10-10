@@ -11,6 +11,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "real"))
+import calibrate  # noqa: E402
 import center  # noqa: E402
 import check  # noqa: E402
 import config  # noqa: E402
@@ -105,9 +106,47 @@ def test_center_plan(present, offset, expected):
     assert center.plan(present, offset) == expected
 
 
-def test_center_write_zeros(tmp_path):
+def test_config_update(tmp_path):
+    p = tmp_path / "config.json"
+    original = (ROOT / "real" / "config.json").read_text()
+    p.write_text(original)
+    config.update(p, {"A_j2": {"zero": 2081}, "B_j1": {"id": 9, "sign": 1}})
+    cfg = config.load(p)
+    assert cfg.joints["A_j2"] == dataclasses.replace(CFG.joints["A_j2"], zero=2081)
+    assert cfg.joints["B_j1"] == dataclasses.replace(CFG.joints["B_j1"], id=9, sign=1)
+    assert {n: j for n, j in cfg.joints.items() if n not in ("A_j2", "B_j1")} == \
+        {n: j for n, j in CFG.joints.items() if n not in ("A_j2", "B_j1")}
+    assert len(p.read_text().splitlines()) == len(original.splitlines())   # 한 줄에 관절 하나 유지
+
+
+def test_config_update_missing_joint(tmp_path):
     p = tmp_path / "config.json"
     p.write_text((ROOT / "real" / "config.json").read_text())
-    center.write_zeros(p, {"A_j2": 2081, "B_j1": 2029})
-    cfg = config.load(p)
-    assert (cfg.joints["A_j2"].zero, cfg.joints["B_j1"].zero, cfg.joints["A_j1"].zero) == (2081, 2029, 2048)
+    with pytest.raises(ValueError):
+        config.update(p, {"D_j1": {"id": 8}})
+    with pytest.raises(ValueError):
+        config.update(p, {"A_j1": {"speed": 1}})
+
+
+def test_detect_picks_largest_unassigned_mover():
+    before = {1: 2048, 2: 2048, 3: 2048}
+    assert calibrate.detect(before, {1: 2060, 2: 1700, 3: 2300}, set()) == (2, -348)
+    assert calibrate.detect(before, {1: 2060, 2: 1700, 3: 2300}, {2}) == (3, 252)
+
+
+def test_detect_none_when_too_little_movement():
+    before = {1: 2048, 2: 2048}
+    assert calibrate.detect(before, {1: 2048 + calibrate.MIN_TICKS - 1, 2: 2000}, set()) is None
+    assert calibrate.detect(before, {1: 3000, 2: 2048}, {1}) is None
+
+
+@pytest.mark.parametrize("name, delta, old, expected", [
+    ("A_j1", +300, 1, -1),    # A는 음수 방향이 오므림: tick이 늘면 모터 +는 관절 -
+    ("A_j2", -300, 1, 1),
+    ("B_j1", +300, -1, 1),    # B/C는 양수 방향이 오므림
+    ("C_j2", -300, 1, -1),
+    ("A_j0", +300, -1, -1),   # 엄지 좌우는 기준 방향이 없어 기존 값 유지
+    ("A_j0", -300, 1, 1),
+])
+def test_joint_sign(name, delta, old, expected):
+    assert calibrate.joint_sign(name, delta, old) == expected
