@@ -5,8 +5,12 @@
   python run_sim.py --headless   # 뷰어 없이 수치만 확인 (WSL2/서버 등)
 """
 import argparse
+import sys
 import time
 from pathlib import Path
+
+if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 import mujoco
 import numpy as np
@@ -18,7 +22,7 @@ CLOSE_SIGN = {"A": -1.0, "B": +1.0, "C": +1.0}
 Q_CLOSE = {"j1": 0.3, "j2": 1.2}   # rad, 오므렸을 때 목표 각도 (크기). 이 값까지는 손가락끼리 안 부딪힘
 PERIOD = 4.0                       # s, 한 번 오므렸다 펴는 주기
 YAW_AMPLITUDE = 0.25               # rad, 엄지 대립(Yaw/A_j0) 회전 진폭 (~14.3도)
-# 원격 조종(teleop.py, motors.py)용
+# 실물 모터(motors.py) 및 제어 파라미터
 YAW_GAIN = 5.0                     # 사람 엄지 좌우 → A_j0 반영 배율. 엄지를 끝까지 벌리면 YAW_GAIN × YAW_AMPLITUDE
 YAW_LIMIT = 1.0472                 # rad (60도), A_j0가 갈 수 있는 끝. hand.xml A_j0 range와 같음
 

@@ -6,12 +6,10 @@
 사용법 (src/에서)
   python motors.py calibrate   # 토크 끈 채로 손으로 관절을 움직여 motors.json 작성
   python motors.py check       # 토크 끈 채로 현재 관절 각도(rad) 출력. 손으로 움직여 부호 확인
-  python teleop.py --motors motors.json   # 카메라로 실물 구동
-  python teleop.py --motors try           # 보정 없이 시험 (아래 TRY_ 가정, 관절당 ±TRY_MAX_ANGLE)
 
 안전 장치
   - 목표는 각 관절의 [펼침 0, run_sim.Q_CLOSE] 범위로 잘라서 보냄. A_j0(엄지 요)는 ±run_sim.YAW_LIMIT
-  - 이동 속도는 모터의 Profile Velocity로 teleop.MAX_SPEED 이하
+  - 이동 속도는 모터의 Profile Velocity로 제한 (기본 max_speed=3.0 rad/s 이하)
   - 시작 시 목표 = 현재 위치로 맞춘 뒤 토크를 켬 (튀지 않게)
   - 위치 제어 모드가 아니거나 하드웨어 에러가 있으면 시작하지 않음 (EEPROM 설정은 바꾸지 않음)
   - 종료·예외 시 토크 끔
