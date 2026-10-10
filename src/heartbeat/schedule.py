@@ -23,6 +23,12 @@ RULES = SCHEDULE.get("rules", {})
 FIRST_BAR: int = SECTIONS[0]["bars"][0]
 LAST_BAR: int = SECTIONS[-1]["bars"][1]
 
+#: 음원을 틀기 전에 조립 자세에서 첫 키프레임(누운 자세)으로 옮기는 데 쓰는 시간(s).
+#: 비트 그리드 밖이라 연출에 영향이 없고, 길수록 관절 속도가 낮아 안전하다.
+PREROLL: float = RULES.get("preroll_seconds", 3.0)
+#: 프리롤 도착 후 제어기가 자세를 잡도록 목표를 유지하는 시간(s).
+PREROLL_SETTLE: float = RULES.get("preroll_settle_seconds", 0.7)
+
 
 def get_motion(bar: int) -> tuple[str, float]:
     """bar번 마디의 (동작 ID, 동작이 시작된 마디). 배정이 없으면 ValueError."""

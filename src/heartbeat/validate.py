@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # src/ 를 import
 
 from heartbeat.choreo import to_rad
 from heartbeat.grid import BEAT_PERIOD, END as AUDIO_END, time_to_bar_beat
-from heartbeat.schedule import JOINTS, MOTIONS, build_timeline
+from heartbeat.schedule import JOINTS, MOTIONS, PREROLL, build_timeline
 from motors import safe_range
 
 MAX_SPEED = 3.0          # rad/s, AGENTS.md 3장 관절 회전 속도 상한
@@ -80,6 +80,23 @@ def check_grid_alignment() -> list[str]:
     return bad
 
 
+def check_preroll(timeline, seconds: float) -> list[str]:
+    """음원 전 프리롤(조립 자세 0 rad → 첫 키프레임)도 속도 상한을 지키는지.
+
+    첫 키프레임이 누운 자세라 조립 자세와 멀다. 비트 그리드 밖이라 시간표 검사가
+    닿지 않으므로 따로 본다. 보간은 smoothstep이라 순간 최대는 평균의 1.5배.
+    """
+    if seconds <= 0:
+        return ["프리롤 시간이 0 이하입니다 (조립 자세에서 첫 자세로 순간 이동)"]
+    bad = []
+    for j in JOINTS:
+        v = abs(to_rad(j, timeline[0]["q"][j])) / seconds * EASE_PEAK["inout"]
+        if v > MAX_SPEED:
+            bad.append(f"프리롤 {j}: 순간 {v:.2f} rad/s > {MAX_SPEED} "
+                       f"(PREROLL을 {abs(to_rad(j, timeline[0]['q'][j])) * EASE_PEAK['inout'] / MAX_SPEED:.1f}s 이상으로)")
+    return bad
+
+
 def check_duration(timeline) -> list[str]:
     last = timeline[-1]["t"]
     if last > AUDIO_END:
@@ -88,11 +105,14 @@ def check_duration(timeline) -> list[str]:
     return []
 
 
-def validate_all(verbose: bool = False) -> list[dict]:
-    """규칙 1~4를 모두 검사하고 타임라인을 돌려준다. 위반 시 ValidationError."""
+def validate_all(verbose: bool = False, preroll: float | None = None) -> list[dict]:
+    """규칙 1~4와 프리롤을 모두 검사하고 타임라인을 돌려준다. 위반 시 ValidationError."""
+    if preroll is None:
+        preroll = PREROLL
     timeline = build_timeline()
     problems = (check_safe_range(timeline) + check_speed_limit(timeline)
-                + check_grid_alignment() + check_duration(timeline))
+                + check_grid_alignment() + check_duration(timeline)
+                + check_preroll(timeline, preroll))
     if problems:
         raise ValidationError("시간표 검증 실패:\n  - " + "\n  - ".join(problems))
     if verbose:

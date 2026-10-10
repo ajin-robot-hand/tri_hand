@@ -25,7 +25,8 @@ import numpy as np
 
 from heartbeat.choreo import END, START, choreo
 from heartbeat.grid import BAR_PERIOD, bar_beat_to_time, time_to_bar_beat
-from heartbeat.schedule import FIRST_BAR, LAST_BAR, get_motion
+from heartbeat.schedule import (FIRST_BAR, LAST_BAR, PREROLL, PREROLL_SETTLE,
+                                get_motion)
 from heartbeat.validate import validate_all
 
 SCENE = Path(__file__).resolve().parents[1] / "scene.xml"
@@ -41,6 +42,8 @@ VIDEO_OFFSET = 0.966
 MAX_CATCHUP_STEPS = 50   # 한 프레임에서 따라잡을 최대 물리 스텝 수 (렉이 나도 폭주 방지)
 RESYNC_THRESHOLD = 0.25  # s. 이보다 뒤처지면 스텝으로 메우지 않고 시각을 바로 맞춘다
 
+# 프리롤(음원 전 누운 자세로 이동) 시간은 schedule.json "rules"에서 온다.
+
 
 def apply_ctrl(model, data, t: float) -> None:
     """t 시점의 목표를 액추에이터에 싣는다."""
@@ -54,16 +57,68 @@ def _joint_qpos(model, data) -> np.ndarray:
                      for a in range(model.nu)])
 
 
-def reset_to_start(model, data) -> None:
-    """음원이 시작되기 전에 이미 첫 자세로 서 있게 한다.
+def preroll_pose(elapsed: float, seconds: float = PREROLL) -> dict[str, float]:
+    """프리롤 경과 시간 → 목표 각도(rad).
 
-    qpos=0에서 출발시키면 첫 마디에 제어기가 자세를 따라잡느라 큰 튐이 생긴다.
-    연출상으로도 손은 음악이 나오기 전부터 '누운 자세'로 있어야 맞다.
+    조립 자세(모든 관절 0 rad)에서 첫 키프레임 자세로 smoothstep 보간한다.
+    `seconds`를 지나면 첫 키프레임 자세를 그대로 유지한다.
     """
-    mujoco.mj_resetData(model, data)
-    for joint, q in choreo(START).items():
-        data.qpos[model.joint(joint).qposadr[0]] = q
+    u = min(elapsed / seconds, 1.0) if seconds > 0 else 1.0
+    s = u * u * (3.0 - 2.0 * u)               # smoothstep: 출발·도착 모두 감속
+    return {j: q * s for j, q in choreo(START).items()}
+
+
+def preroll_to_start(model, data, seconds: float = PREROLL,
+                     settle: float = PREROLL_SETTLE, verbose: bool = True) -> float:
+    """음원을 틀기 전에 조립 자세에서 첫 키프레임의 누운 자세로 천천히 옮긴다.
+
+    첫 키프레임이 '바깥으로 누움'이라 조립 자세와 1.5 rad 가까이 떨어져 있다. 음원과 함께
+    출발시키면 제어기가 첫 마디 내내 자세를 쫓느라 크게 튀고, 실물에서는 그 튐이
+    그대로 모터 급가속이 된다. 그래서 비트 그리드 바깥에서 미리 옮겨 두고 시작한다.
+
+    도달 후 `settle` 동안 목표를 유지해 제어기가 중력 처짐까지 잡게 한다.
+    돌려주는 값은 이 구간에서 관측된 최대 관절 속도(rad/s).
+    """
+    mujoco.mj_resetData(model, data)          # 조립 자세 = 모든 관절 0 rad
     mujoco.mj_forward(model, data)
+    dt = model.opt.timestep
+    peak = 0.0
+    for step in range(int((seconds + settle) / dt) + 1):
+        for joint, q_des in preroll_pose(step * dt, seconds).items():
+            data.ctrl[model.actuator(f"{joint}_act").id] = q_des
+        mujoco.mj_step(model, data)
+        peak = max(peak, float(np.abs(data.qvel[:model.nu]).max()))
+
+    data.time = 0.0                           # 본 재생은 t=START부터 센다
+    if verbose:
+        names = [model.joint(model.actuator(a).trnid[0]).name for a in range(model.nu)]
+        goal = choreo(START)
+        err = float(np.abs(_joint_qpos(model, data)
+                           - np.array([goal[n] for n in names])).max())
+        print(f"프리롤 {seconds:.1f}s + 안정화 {settle:.1f}s → 누운 시작 자세 "
+              f"(최대 관절 속도 {peak:.2f} rad/s, 도착 오차 {err:.4f} rad)")
+    return peak
+
+
+def _preroll_in_viewer(model, data, viewer, seconds: float = PREROLL,
+                       settle: float = PREROLL_SETTLE) -> None:
+    """뷰어를 돌리면서 실시간으로 프리롤. 음원은 이 함수가 끝난 뒤에 시작한다."""
+    print(f"프리롤 {seconds:.1f}s — 누운 시작 자세로 이동 중…")
+    dt = model.opt.timestep
+    t0 = time.perf_counter()
+    while viewer.is_running():
+        elapsed = time.perf_counter() - t0
+        if elapsed >= seconds + settle:
+            break
+        for joint, q_des in preroll_pose(elapsed, seconds).items():
+            data.ctrl[model.actuator(f"{joint}_act").id] = q_des
+        for _ in range(MAX_CATCHUP_STEPS):
+            if data.time >= elapsed:
+                break
+            mujoco.mj_step(model, data)
+        viewer.sync()
+        time.sleep(dt)
+    data.time = 0.0                           # 본 재생은 t=START부터 센다
 
 
 def _bar_label(bar: int) -> str:
@@ -75,7 +130,7 @@ def _bar_label(bar: int) -> str:
 # ---------------------------------------------------------------- 헤드리스
 def run_headless(model, data, lead: float = LEAD) -> None:
     """가상 시간으로 전구간을 빠르게 돌며 발산·자가 충돌·추종 오차를 본다."""
-    reset_to_start(model, data)
+    preroll_to_start(model, data)
     floor = model.geom("floor").id
     dt = model.opt.timestep
     names = [model.joint(model.actuator(a).trnid[0]).name for a in range(model.nu)]
@@ -130,11 +185,17 @@ def run_viewer(model, data, clock, lead: float = LEAD) -> None:
     """마스터 클럭(음원 재생 위치)을 따라가며 뷰어를 돌린다."""
     import mujoco.viewer
 
-    reset_to_start(model, data)
+    mujoco.mj_resetData(model, data)
+    mujoco.mj_forward(model, data)
     with mujoco.viewer.launch_passive(model, data, show_left_ui=False,
                                       show_right_ui=False) as v:
         v.cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
         v.cam.fixedcamid = model.camera("iso").id
+        # 음원을 틀기 전에 눈에 보이게 누운 자세로 옮긴다. 뷰어가 이미 떠 있으므로
+        # 관객(과 실물 옆의 사람)이 손이 자리를 잡는 것을 보고 나서 음악이 시작된다.
+        _preroll_in_viewer(model, data, v)
+        if not v.is_running():
+            return
         try:
             clock.start()
         except Exception as e:

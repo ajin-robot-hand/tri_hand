@@ -14,7 +14,7 @@ from heartbeat.grid import (BAR_PERIOD, BARS, BEAT_PERIOD,      # noqa: E402
                             END, FIRST_DOWNBEAT, bar_beat_to_time,
                             snap_to_grid, time_to_bar_beat)
 from motors import safe_range                                   # noqa: E402
-from run_sim import CLOSE_SIGN, Q_CLOSE                         # noqa: E402
+from run_sim import CLOSE_SIGN, Q_CLOSE, Q_OPEN                 # noqa: E402
 
 JOINTS = set(sched.JOINTS)
 
@@ -56,6 +56,15 @@ def test_phase2_normalised_value_converts_with_close_sign():
     assert to_rad("B_j2", 0.5) == pytest.approx(CLOSE_SIGN["B"] * Q_CLOSE["j2"] * 0.5)
     assert to_rad("A_j2", 0.5) == pytest.approx(CLOSE_SIGN["A"] * Q_CLOSE["j2"] * 0.5)
     assert to_rad("A_j0", 0.5) == pytest.approx(0.5)   # 요는 이미 rad
+
+
+def test_phase2_negative_normalised_value_lies_the_finger_outward():
+    """음수 q는 오므림의 반대, 즉 바깥으로 눕는 방향이고 크기는 Q_OPEN이 정한다."""
+    assert to_rad("B_j2", -1.0) == pytest.approx(-CLOSE_SIGN["B"] * Q_OPEN["j2"])
+    assert to_rad("A_j2", -1.0) == pytest.approx(-CLOSE_SIGN["A"] * Q_OPEN["j2"])
+    # 오므림과 눕힘은 0을 사이에 두고 반대 부호다
+    assert to_rad("B_j2", 1.0) * to_rad("B_j2", -1.0) < 0
+    assert to_rad("A_j2", 1.0) * to_rad("A_j2", -1.0) < 0
 
 
 def test_phase2_keyframe_values_are_hit_exactly_on_the_beat():
@@ -101,12 +110,18 @@ def test_phase3_sections_match_the_video_reading():
     assert sched.get_motion(19)[0] == "claw"     # 영상 29.7~33.2s 가로 스윕
 
 
-def test_phase3_two_bar_motions_restart_only_every_other_bar():
-    """veil은 8박(2마디)짜리라 마디 5, 7에서만 새로 시작한다."""
-    assert sched.get_motion(5) == ("veil", 5)
-    assert sched.get_motion(6) == ("veil", 5)
-    assert sched.get_motion(7) == ("veil", 7)
-    assert sched.get_motion(8) == ("veil", 7)
+def test_phase3_multi_bar_motions_restart_only_when_they_are_done():
+    """veil은 16박(4마디)짜리라 마디 5에서 한 번만 시작한다.
+
+    A가 누운 자세에서 서서히 일어서는 한 호흡이라, 2마디마다 반복되면
+    다 일어선 A가 다시 누워 버린다. 그래서 구간 전체를 한 번에 덮는다.
+    """
+    assert [sched.get_motion(b) for b in (5, 6, 7, 8)] == [("veil", 5)] * 4
+    # rise는 8박(2마디)이고 구간도 2마디라 역시 한 번만
+    assert sched.get_motion(9) == sched.get_motion(10) == ("rise", 9)
+    # clasp은 4박(1마디)이라 마디마다 다시 시작한다
+    assert sched.get_motion(11) == ("clasp", 11)
+    assert sched.get_motion(12) == ("clasp", 12)
 
 
 def test_phase3_bar_outside_the_analysed_range_is_rejected():
@@ -117,6 +132,61 @@ def test_phase3_bar_outside_the_analysed_range_is_rejected():
 def test_phase3_timeline_is_strictly_increasing():
     times = [kf["t"] for kf in sched.build_timeline()]
     assert all(b > a for a, b in zip(times, times[1:]))
+
+
+# --------------------------------------------------- 누움 → 일어섬 연출
+def _lying(q: float) -> bool:
+    return q < -0.8        # 거의 다 누움
+
+
+def test_choreo_opens_lying_outward_on_every_finger():
+    """곡은 세 손가락이 모두 바깥으로 누운 채 시작한다."""
+    start = pose_norm(choreo_mod.START)
+    assert all(_lying(start[j]) for j in ("A_j1", "A_j2", "B_j1", "B_j2", "C_j1", "C_j2"))
+
+
+def test_veil_raises_only_finger_a():
+    """veil(마디 5~8) 끝에서 A만 일어서고 B·C는 누운 채로 남는다."""
+    end_of_veil = pose_norm(bar_beat_to_time(8, 3.9))
+    assert end_of_veil["A_j2"] > -0.2, "A가 일어서지 않았다"
+    assert end_of_veil["A_j1"] > -0.2
+    assert _lying(end_of_veil["B_j2"]) and _lying(end_of_veil["C_j2"]), "B·C가 먼저 일어섰다"
+
+
+def test_rise_brings_every_finger_up():
+    """rise(마디 9~10)가 끝나면 세 손가락 모두 선다."""
+    end_of_rise = pose_norm(bar_beat_to_time(10, 3.9))
+    for j in ("A_j1", "A_j2", "B_j1", "B_j2", "C_j1", "C_j2"):
+        assert end_of_rise[j] > -0.2, f"{j}={end_of_rise[j]:+.2f} 가 아직 누워 있다"
+
+
+def test_no_finger_lies_down_again_after_rise():
+    """일어선 뒤로는 다시 눕지 않는다 (clasp 이후는 선 자세 위의 오므림)."""
+    for bar in range(11, 20):
+        for beat in (0.0, 1.0, 2.0, 3.0):
+            q = pose_norm(bar_beat_to_time(bar, beat))
+            for j in ("A_j1", "A_j2", "B_j1", "B_j2", "C_j1", "C_j2"):
+                assert q[j] > -0.5, f"마디 {bar}.{beat} {j}={q[j]:+.2f}"
+
+
+# ------------------------------------------------------------- 프리롤
+def test_preroll_starts_from_the_assembled_pose_and_reaches_the_first_keyframe():
+    from heartbeat.play import preroll_pose
+    assert all(v == pytest.approx(0.0) for v in preroll_pose(0.0).values())
+    arrived = preroll_pose(sched.PREROLL)
+    for j, q in choreo(choreo_mod.START).items():
+        assert arrived[j] == pytest.approx(q)
+    # 끝난 뒤로도 첫 자세를 유지한다
+    assert preroll_pose(sched.PREROLL * 2) == pytest.approx(arrived)
+
+
+def test_preroll_is_slow_enough_for_the_speed_limit():
+    assert not val.check_preroll(sched.build_timeline(), sched.PREROLL)
+
+
+def test_validator_rejects_a_preroll_that_is_too_short():
+    assert val.check_preroll(sched.build_timeline(), 0.2)
+    assert val.check_preroll(sched.build_timeline(), 0.0)
 
 
 def test_phase3_timeline_ends_neutral():

@@ -3,7 +3,7 @@
 MuJoCo와 실물이 똑같이 쓰는 순수 함수. 시간만 넣으면 자세가 나오므로
 마스터 클럭(음원 재생 위치)만 정확하면 누적 오차가 생기지 않는다.
 
-정규화값 → rad: CLOSE_SIGN[손가락] * Q_CLOSE[관절] * q.  A_j0만 처음부터 rad.
+정규화값 → rad: CLOSE_SIGN[손가락] * (q>=0 ? Q_CLOSE : Q_OPEN)[관절] * q.  A_j0만 처음부터 rad.
 """
 import bisect
 import sys
@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # src/ 를 import 경로에
 
 from heartbeat.schedule import JOINTS, build_timeline
-from run_sim import CLOSE_SIGN, Q_CLOSE
+from run_sim import CLOSE_SIGN, Q_CLOSE, Q_OPEN
 
 _TIMELINE = build_timeline()
 _TIMES = [kf["t"] for kf in _TIMELINE]
@@ -22,11 +22,16 @@ END: float = _TIMES[-1]
 
 
 def to_rad(joint: str, q_norm: float) -> float:
-    """0~1 정규화 오므림량 → rad. A_j0(요)은 이미 rad이므로 그대로."""
+    """-1~+1 정규화 오므림량 → rad. A_j0(요)은 이미 rad이므로 그대로.
+
+    0이 곧게 편 자세, +1이 오므림 끝(Q_CLOSE), -1이 바깥으로 누운 끝(Q_OPEN)이다.
+    양쪽 끝의 크기가 다를 수 있어 부호에 따라 다른 배율을 쓴다.
+    """
     finger, _, j = joint.partition("_")
     if j not in Q_CLOSE:
         return q_norm
-    return CLOSE_SIGN[finger] * Q_CLOSE[j] * q_norm
+    span = Q_CLOSE[j] if q_norm >= 0.0 else Q_OPEN[j]
+    return CLOSE_SIGN[finger] * span * q_norm
 
 
 def _ease(u: float, kind: str) -> float:

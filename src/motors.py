@@ -8,7 +8,8 @@
   python motors.py check       # 토크 끈 채로 현재 관절 각도(rad) 출력. 손으로 움직여 부호 확인
 
 안전 장치
-  - 목표는 각 관절의 [펼침 0, run_sim.Q_CLOSE] 범위로 잘라서 보냄. A_j0(엄지 요)는 ±run_sim.YAW_LIMIT
+  - 목표는 각 관절의 [바깥쪽 run_sim.Q_OPEN, 오므림 run_sim.Q_CLOSE] 범위로 잘라서 보냄.
+    A_j0(엄지 요)는 ±run_sim.YAW_LIMIT
   - 이동 속도는 모터의 Profile Velocity로 제한 (기본 max_speed=3.0 rad/s 이하)
   - 시작 시 목표 = 현재 위치로 맞춘 뒤 토크를 켬 (튀지 않게)
   - 위치 제어 모드가 아니거나 하드웨어 에러가 있으면 시작하지 않음 (EEPROM 설정은 바꾸지 않음)
@@ -23,7 +24,7 @@ from pathlib import Path
 from dynamixel_sdk import COMM_RX_TIMEOUT, COMM_SUCCESS, GroupSyncRead, GroupSyncWrite, PacketHandler, PortHandler
 from serial import SerialException
 
-from run_sim import CLOSE_SIGN, Q_CLOSE, YAW_LIMIT
+from run_sim import CLOSE_SIGN, Q_CLOSE, Q_OPEN, YAW_LIMIT
 
 CONFIG = Path(__file__).with_name("motors.json")
 DEFAULT_PORT = "/dev/tty.usbserial-FTBIN9LO"
@@ -49,11 +50,16 @@ MIN_CALIBRATION_TICKS = 100   # 약 9°. 이보다 덜 움직이면 어느 모�
 
 
 def safe_range(name: str) -> tuple[float, float]:
-    """관절이 갈 수 있는 범위(rad): 펼침(0) ~ 오므림 Q_CLOSE. A_j0는 ±YAW_LIMIT"""
+    """관절이 갈 수 있는 범위(rad): 바깥쪽 Q_OPEN ~ 오므림 Q_CLOSE. A_j0는 ±YAW_LIMIT
+
+    곧게 편 자세(0)는 범위의 끝이 아니라 가운데다. 오므림 쪽 한계는 손가락 간 간섭이,
+    바깥쪽 한계는 실물의 기구 정지점이 정한다 (run_sim.Q_OPEN 주석 참고).
+    """
     finger, _, j = name.partition("_")
     if j not in Q_CLOSE:
         return -YAW_LIMIT, YAW_LIMIT
-    return tuple(sorted((0.0, CLOSE_SIGN[finger] * Q_CLOSE[j])))
+    return tuple(sorted((-CLOSE_SIGN[finger] * Q_OPEN[j],
+                         CLOSE_SIGN[finger] * Q_CLOSE[j])))
 
 
 def to_raw(cal: dict, q: float) -> int:

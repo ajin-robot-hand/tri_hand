@@ -169,6 +169,10 @@ curl -X POST http://localhost:8000/reset
 > macOS는 GUI 뷰어에 `mjpython`을 써야 합니다. 음원 출력·뷰어·실물 모터는 **윈도우 네이티브** 환경을 권장합니다(WSL2 아님).
 
 #### 동기화 구조
+0. **프리롤 — 음원을 틀기 전에 첫 자세를 먼저 완성합니다.** 첫 키프레임이 "바닥에 누운" 자세(손바닥쪽 `j1` 1.2 rad)라
+   조립 자세(0 rad)와 멉니다. 음원과 동시에 출발시키면 제어기가 첫 마디 내내 자세를 쫓느라 크게 튀므로,
+   비트 격자 바깥에서 누운 자세로 천천히 옮기고 안정화를 기다린 뒤에 음원을 시작합니다.
+   시간은 `schedule.json` → `rules.preroll_seconds` / `preroll_settle_seconds`에서 조정합니다.
 1. **마스터 클럭은 오디오 스트림 하나뿐**입니다. PortAudio가 콜백마다 알려주는 `outputBufferDacTime`
    (그 버퍼가 스피커로 나가는 시각)으로 "지금 귀에 들리는 음원 위치"를 계산합니다.
    출력 장치 지연(MME 기준 91 ms)이 여기서 자동으로 보정됩니다.
@@ -182,6 +186,10 @@ curl -X POST http://localhost:8000/reset
 |---|---|---|
 | `LEAD` | 0.050 s | `--headless` 추종 오차가 0.05 rad을 넘을 때. `--lead` 옵션으로 즉시 실험 가능 |
 | `AUDIO_OFFSET` | 0.0 s | **귀로 맞추는 값.** 손이 음악보다 늦으면 음수, 빠르면 양수. `--offset` 옵션 |
+
+프리롤 시간은 `play.py`가 아니라 `src/heartbeat/schedule.json`의 `rules.preroll_seconds`(이동) ·
+`rules.preroll_settle_seconds`(도착 후 안정화)에 있습니다. 줄이면 대기가 짧아지는 대신 관절 속도가
+올라가고, 너무 짧으면 `validate.check_preroll`이 필요한 최소값을 찍고 중단합니다.
 
 ```bash
 # LEAD를 바꿔 가며 추종 오차 비교
@@ -200,16 +208,17 @@ curl -X POST http://localhost:8000/reset
 .\.venv\Scripts\python.exe src\heartbeat\schedule.py
 
 # 안전 범위·속도 상한·격자 정렬·길이 검증 (play.py가 실행 전 자동 호출)
-.\.venv\Scripts\python.exe src\heartbeatalidate.py
+.\.venv\Scripts\python.exe src\heartbeat\validate.py
 
 # 단위 테스트
-.\.venv\Scripts\python.exe -m pytest tests	est_heartbeat.py -q
+.\.venv\Scripts\python.exe -m pytest tests\test_heartbeat.py -q
 ```
 
 #### 안무를 고치고 싶을 때
-- `src/heartbeat/motions.json` — 동작별 키프레임. `q`는 0~1 정규화 오므림량(0=펼침, 1=`Q_CLOSE`),
+- `src/heartbeat/motions.json` — 동작별 키프레임. `q`는 **−1~+1** 정규화 오므림량으로, `0`이 곧게 편
+  자세(범위의 끝이 아니라 가운데), `+1`이 오므림 끝(`Q_CLOSE`), `−1`이 바깥으로 누운 끝(`Q_OPEN`)입니다.
   `A_j0`만 rad. 적지 않은 관절은 직전 값을 유지합니다.
-- `src/heartbeat/schedule.json` — 어느 마디에 어느 동작을 쓸지.
+- `src/heartbeat/schedule.json` — 어느 마디에 어느 동작을 쓸지, 악센트·복귀·프리롤 설정(`rules`).
 - 고친 뒤 `validate.py`를 돌리면 안전 범위·속도 상한 위반을 **어느 키프레임인지까지** 짚어 줍니다.
 
 > ⚠ 속도 검사는 평균이 아니라 **순간 최대 속도**로 합니다. `ease="out"`은 출발 기울기가 평균의 3배라

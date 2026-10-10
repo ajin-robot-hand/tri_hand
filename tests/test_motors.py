@@ -6,7 +6,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import motors  # noqa: E402
-from run_sim import Q_CLOSE, YAW_LIMIT  # noqa: E402
+from run_sim import CLOSE_SIGN, Q_CLOSE, Q_OPEN, YAW_LIMIT  # noqa: E402
 
 
 class FakeBus:
@@ -51,13 +51,29 @@ def goal(bus, i):
     return bus.reg[i][motors.GOAL_POSITION]
 
 
-def test_targets_are_clipped_between_straight_and_close_angle():
+def test_targets_are_clipped_between_the_open_and_close_limits():
     bus = FakeBus([1, 3, 5])
     with hand(bus) as h:
-        h.send({"B_j2": 5.0, "A_j2": +0.5, "A_j0": 2.0})   # 지나치게 오므림 / 반대로 젖힘 / 엄지 요
+        h.send({"B_j2": 5.0, "A_j2": +5.0, "A_j0": 2.0})   # 지나치게 오므림 / 지나치게 누움 / 엄지 요
         assert goal(bus, 5) == motors.to_raw(JOINTS["B_j2"], Q_CLOSE["j2"])
-        assert goal(bus, 3) == JOINTS["A_j2"]["zero"]   # 펼침 너머로 가지 않음
+        # A의 오므림은 -이므로 +는 바깥(누움) 방향. Q_OPEN에서 잘린다
+        assert goal(bus, 3) == motors.to_raw(JOINTS["A_j2"], Q_OPEN["j2"])
         assert goal(bus, 1) == motors.to_raw(JOINTS["A_j0"], YAW_LIMIT)   # 엄지 요는 ±YAW_LIMIT
+
+
+def test_straight_pose_is_inside_the_range_not_at_its_edge():
+    """곧게 편 0 rad은 범위의 끝이 아니라 가운데다 (바깥으로 누울 수 있어야 하므로)."""
+    for name in ("A_j1", "A_j2", "B_j1", "B_j2", "C_j1", "C_j2"):
+        lo, hi = motors.safe_range(name)
+        assert lo < 0.0 < hi, f"{name} 범위 [{lo:+.3f}, {hi:+.3f}] 가 0을 끝으로 둔다"
+
+
+def test_open_and_close_limits_sit_on_opposite_sides_of_straight():
+    for finger in "ABC":
+        lo, hi = motors.safe_range(f"{finger}_j2")
+        close = CLOSE_SIGN[finger] * Q_CLOSE["j2"]
+        open_ = -CLOSE_SIGN[finger] * Q_OPEN["j2"]
+        assert {lo, hi} == {min(close, open_), max(close, open_)}
 
 
 def test_joint_without_target_keeps_its_goal():
