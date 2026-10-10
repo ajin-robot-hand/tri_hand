@@ -105,9 +105,23 @@ def test_center_plan(present, offset, expected):
     assert center.plan(present, offset) == expected
 
 
-def test_center_write_zeros(tmp_path):
+def test_config_update(tmp_path):
+    p = tmp_path / "config.json"
+    original = (ROOT / "real" / "config.json").read_text()
+    p.write_text(original)
+    config.update(p, {"A_j2": {"zero": 2081}, "B_j1": {"id": 9, "sign": 1}})
+    cfg = config.load(p)
+    assert cfg.joints["A_j2"] == dataclasses.replace(CFG.joints["A_j2"], zero=2081)
+    assert cfg.joints["B_j1"] == dataclasses.replace(CFG.joints["B_j1"], id=9, sign=1)
+    assert {n: j for n, j in cfg.joints.items() if n not in ("A_j2", "B_j1")} == \
+        {n: j for n, j in CFG.joints.items() if n not in ("A_j2", "B_j1")}
+    assert len(p.read_text().splitlines()) == len(original.splitlines())   # 한 줄에 관절 하나 유지
+
+
+def test_config_update_missing_joint(tmp_path):
     p = tmp_path / "config.json"
     p.write_text((ROOT / "real" / "config.json").read_text())
-    center.write_zeros(p, {"A_j2": 2081, "B_j1": 2029})
-    cfg = config.load(p)
-    assert (cfg.joints["A_j2"].zero, cfg.joints["B_j1"].zero, cfg.joints["A_j1"].zero) == (2081, 2029, 2048)
+    with pytest.raises(ValueError):
+        config.update(p, {"D_j1": {"id": 8}})
+    with pytest.raises(ValueError):
+        config.update(p, {"A_j1": {"speed": 1}})

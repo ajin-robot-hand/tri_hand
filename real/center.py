@@ -13,7 +13,6 @@
 종료 코드: 오류가 하나라도 있으면 1
 """
 import argparse
-import re
 import sys
 from pathlib import Path
 
@@ -30,16 +29,6 @@ def plan(present: int, offset: int) -> tuple[int, int]:
     actual = (present - offset) % TICKS_PER_REV
     new = max(-OFFSET_LIMIT, min(OFFSET_LIMIT, CENTER - actual))
     return new, actual + new
-
-
-def write_zeros(path: Path, zeros: dict[str, int]):
-    """config.json의 zero 값만 바꿈. 한 줄에 관절 하나인 기존 형식을 유지."""
-    text = path.read_text(encoding="utf-8")
-    for n, z in zeros.items():
-        text, count = re.subn(rf'("{n}":\s*{{[^}}]*"zero":\s*)-?\d+', rf"\g<1>{z}", text)
-        if count != 1:
-            raise ValueError(f"{path}에서 {n}의 zero를 찾지 못함")
-    path.write_text(text, encoding="utf-8")
 
 
 def main() -> int:
@@ -97,7 +86,7 @@ def main() -> int:
         print(f"✗ {e}")
         return 1
     if zeros:
-        write_zeros(args.config, zeros)
+        cfgmod.update(args.config, {n: {"zero": z} for n, z in zeros.items()})
         print(f"config zero 수정: {zeros}")
     return 0 if ok else 1
 
