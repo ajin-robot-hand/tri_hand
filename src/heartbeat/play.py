@@ -183,12 +183,19 @@ def run_headless(model, data, lead: float = LEAD) -> None:
 # ------------------------------------------------------------------- 뷰어
 def run_viewer(model, data, clock, lead: float = LEAD) -> None:
     """마스터 클럭(음원 재생 위치)을 따라가며 뷰어를 돌린다."""
+    import atexit
+    import threading
+    import glfw
     import mujoco.viewer
 
     mujoco.mj_resetData(model, data)
     mujoco.mj_forward(model, data)
-    with mujoco.viewer.launch_passive(model, data, show_left_ui=False,
-                                      show_right_ui=False) as v:
+
+    v = mujoco.viewer.launch_passive(model, data, show_left_ui=False,
+                                      show_right_ui=False)
+    clock_started = False
+    interrupted = False
+    try:
         v.cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
         v.cam.fixedcamid = model.camera("iso").id
         # 음원을 틀기 전에 눈에 보이게 누운 자세로 옮긴다. 뷰어가 이미 떠 있으므로
@@ -198,10 +205,12 @@ def run_viewer(model, data, clock, lead: float = LEAD) -> None:
             return
         try:
             clock.start()
+            clock_started = True
         except Exception as e:
             print(f"  ⚠ 오디오 스트림을 시작할 수 없어 무음으로 전환합니다: {e}", file=sys.stderr)
             clock = SilentClock(offset=getattr(clock, "offset", 0.0), stop_at=getattr(clock, "stop_at", None))
             clock.start()
+            clock_started = True
         bar = 0
         while v.is_running():
             t = clock.t
@@ -227,8 +236,41 @@ def run_viewer(model, data, clock, lead: float = LEAD) -> None:
                 bar = cur_bar
                 print(f"  마디 {bar:3d}  {t:6.2f}s  {_bar_label(bar)}")
             time.sleep(0.002)   # 렌더 루프가 CPU를 다 쓰지 않게
-        clock.stop()
-    print("\n재생 종료 — 중립 자세로 복귀했습니다.")
+
+        # 재생 종료 후 중립 자세로 부드럽게 복귀 (0.2s)
+        if v.is_running():
+            for _ in range(int(0.2 / model.opt.timestep)):
+                apply_ctrl(model, data, END)
+                mujoco.mj_step(model, data)
+                v.sync()
+                time.sleep(model.opt.timestep)
+
+    except KeyboardInterrupt:
+        interrupted = True
+        print("\n  ⚠ 사용자에 의해 재생이 중단되었습니다.")
+    finally:
+        if clock_started:
+            try:
+                clock.stop()
+            except Exception:
+                pass
+        try:
+            v.close()
+        except Exception:
+            pass
+        # 뷰어 백그라운드 스레드가 완전히 정리될 때까지 안전하게 대기
+        for t in threading.enumerate():
+            if t is not threading.main_thread():
+                t.join(timeout=1.0)
+        # GLFW atexit 핸들러와 메인 스레드 간의 X11 경합 방지
+        try:
+            atexit.unregister(glfw.terminate)
+            glfw.terminate()
+        except Exception:
+            pass
+
+    if not interrupted:
+        print("\n재생 종료 — 중립 자세로 복귀했습니다.")
 
 
 def main(argv=None) -> int:
@@ -265,9 +307,16 @@ def main(argv=None) -> int:
     print(f"\n▶ 재생: 마디 {FIRST_BAR}~{LAST_BAR}  "
           f"(음원 {START:.2f}~{END:.2f}s = 영상 {START-VIDEO_OFFSET:.2f}~{END-VIDEO_OFFSET:.2f}s), "
           f"1마디 {BAR_PERIOD:.3f}s\n")
-    run_viewer(model, data, clock, lead=args.lead)
+    try:
+        run_viewer(model, data, clock, lead=args.lead)
+    except KeyboardInterrupt:
+        return 0
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except KeyboardInterrupt:
+        raise SystemExit(0)
+
