@@ -174,6 +174,8 @@ tests/test_heartbeat.py
 
 ## 9. 단계와 완료 기준
 
+Phase별 상세 작업 내용·API·테스트는 **[implementation-plan.md](implementation-plan.md)** 참조.
+
 | 단계 | 내용 | 완료 기준 | 음원·GUI 필요 |
 |---|---|---|---|
 | 0 | 음원 격자 확정 | `grid.json` 커밋 (BPM 135, 첫 박 0.422 s) | ✅ 완료 |
