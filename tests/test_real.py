@@ -11,6 +11,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "real"))
+import calibrate  # noqa: E402
 import center  # noqa: E402
 import check  # noqa: E402
 import config  # noqa: E402
@@ -125,3 +126,27 @@ def test_config_update_missing_joint(tmp_path):
         config.update(p, {"D_j1": {"id": 8}})
     with pytest.raises(ValueError):
         config.update(p, {"A_j1": {"speed": 1}})
+
+
+def test_detect_picks_largest_unassigned_mover():
+    before = {1: 2048, 2: 2048, 3: 2048}
+    assert calibrate.detect(before, {1: 2060, 2: 1700, 3: 2300}, set()) == (2, -348)
+    assert calibrate.detect(before, {1: 2060, 2: 1700, 3: 2300}, {2}) == (3, 252)
+
+
+def test_detect_none_when_too_little_movement():
+    before = {1: 2048, 2: 2048}
+    assert calibrate.detect(before, {1: 2048 + calibrate.MIN_TICKS - 1, 2: 2000}, set()) is None
+    assert calibrate.detect(before, {1: 3000, 2: 2048}, {1}) is None
+
+
+@pytest.mark.parametrize("name, delta, old, expected", [
+    ("A_j1", +300, 1, -1),    # A는 음수 방향이 오므림: tick이 늘면 모터 +는 관절 -
+    ("A_j2", -300, 1, 1),
+    ("B_j1", +300, -1, 1),    # B/C는 양수 방향이 오므림
+    ("C_j2", -300, 1, -1),
+    ("A_j0", +300, -1, -1),   # 엄지 좌우는 기준 방향이 없어 기존 값 유지
+    ("A_j0", -300, 1, 1),
+])
+def test_joint_sign(name, delta, old, expected):
+    assert calibrate.joint_sign(name, delta, old) == expected
