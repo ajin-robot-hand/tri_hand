@@ -12,12 +12,12 @@
 
 | KPI | 목표 | 측정 정의 | 측정 도구/명령 | 현재값 | 판정 | 근거 파일·커밋 |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **동시 제어 주기 50 Hz** | GroupSyncWrite 안정 구동, 지터 < 2 ms, 누락 프레임 < 0.1% | 50 Hz 주기 제어 루프를 돌리며 `monotonic_ns` 기준 주기 편차를 기록 | (미구현) | 목표 쓰기가 `GroupSyncWrite`가 아니라 관절별 `write1/2/4ByteTxRx` 7회 왕복([real/server.py:176](../real/server.py#L176) `set_targets()`)이고, 50 Hz 주기 루프 자체가 없음(HTTP 요청 시에만 송신) | ⏳ Phase 4(12월) 예정 | `docs/task.md` D-02, T-08/T-11 |
+| **동시 제어 주기 50 Hz** | GroupSyncWrite 안정 구동, 지터 < 2 ms, 누락 프레임 < 0.1% | 50 Hz 루프에서 `monotonic_ns` 기준 주기 편차를 기록 | `/state`의 `loop`(`LoopStats`), 24h 수치는 `run.csv` | 목표 송신은 `GroupSyncWrite` 1패킷으로 전환됨(T-08). 50 Hz 고정 데드라인 루프 + 지터 측정 **구현·단위테스트 완료**(T-11, `jitter_ms_p95`/`dropped_frac` 노출). **실물 24h 지터 수치는 미측정** — 송신은 HTTP 요청 때만(측정만 하는 범위로 합의) | ⏳ 측정 수단 완비, 실물 수치는 Phase 4(12월) | `docs/task.md` T-08/T-11 |
 | **파지 성공률 ≥ 90% (3종)** | Power/Pinch/Spherical 각 n≥30, 판정 기준 적용 | 실물에서 그립 적용 후 유지 시험 | 실물 하드웨어 (`/presets`, [src/server.py:353](../src/server.py#L353)) | 3종 프리셋 **실물에서 정의·동작 확인 완료**. 판정 기준은 계획서 n≥30·5초 유지가 아니라 **파지 후 90° 회전, 3초 이상 유지 = 성공**으로 경량화해 적용. 기록은 사진, 별도 통계 하네스 없음 | ⚠ 경량 수행 (의도적 범위 축소, `docs/task.md` §3 제외 사유 참조) | `docs/task.md` D-04, §3 "제외됨" |
-| **패킷 에러율 < 0.05%** | SDK RX 에러 카운터를 24h 누적해 총 패킷 대비 비율 산출 | (미구현) | `comm_error`에 **마지막 오류 문자열 1건만** 보관([real/server.py:94](../real/server.py#L94)). 누적 카운터·총 패킷 수 없음 | ⏳ Phase 4(12월) 예정 | `docs/task.md` D-02, T-10 |
-| **시스템 가용률 ≥ 99%** | Hardware_Error 자동 Reboot 포함 Downtime/Total time | (미구현) | 오류 **감지**는 됨(`hw_errors`, [real/dxl.py:65](../real/dxl.py#L65)). Dynamixel Reboot(0x08) 명령 미구현, 자동 복구·다운타임 로그 없음 | ⏳ Phase 4(12월) 예정 | `docs/task.md` T-13 |
+| **패킷 에러율 < 0.05%** | SDK RX 에러 카운터를 24h 누적해 총 패킷 대비 비율 산출 | `/state`의 `packets.{tx,rx_errors}`, 24h 누적은 `run.csv`의 `packet_error_rate` | 누적 `tx_count`/`rx_error_count` 카운터(T-10) + CSV 영속화(T-12) **구현 완료**. 인메모리 값은 재시작 시 리셋되나 `run.csv` 스냅샷으로 24h 비율이 남음. **실물 24h 수치는 미측정** | ⏳ 측정 수단 완비, 실물 수치는 Phase 4(12월) | `docs/task.md` T-10/T-12 |
+| **시스템 가용률 ≥ 99%** | Hardware_Error 자동 Reboot 포함 Downtime/Total time | `/state`의 `availability`/`downtime_s`/`reboots`, 24h는 `run.csv` | Reboot(0x08) 래퍼 + 자동 복구(5초 내 복귀 판정) + 다운타임 누적 → 가용률 산출 **구현·단위테스트 완료**(T-13). reboot 후 모드/게인/토크/목표 재설정 포함. **실물 복구 성공 검증은 미실시** | ⏳ 측정 수단 완비, 실물 수치는 Phase 4(12월) | `docs/task.md` T-13 |
 
-> 계획서 간트([Page 8])에서 24h 연속 구동·3종 파지 통계는 **④ 검증(2026.12)** 산출물이고 현재는 **③ HW 통합(2026.10–11)** 단계이므로, 위 4개 KPI의 ⏳ 표시는 *미달*이 아니라 *일정대로 미착수*입니다. 단, DB 로깅/ERD(계획서 Phase 1 산출물, §3 참조)는 유일하게 실제 일정 지연입니다.
+> 계획서 간트([Page 8])에서 24h 연속 구동·3종 파지 통계는 **④ 검증(2026.12)** 산출물이고 현재는 **③ HW 통합(2026.10–11)** 단계이므로, 위 KPI의 ⏳ 표시는 *미달*이 아니라 *일정대로 미착수*입니다. 50 Hz 지터·패킷 에러율·가용률의 **측정/복구/로깅 레이어는 이제 모두 구현·단위테스트까지 완료**(T-11~T-14)되어, 남은 것은 실물 24h 구동으로 수치를 채우는 일뿐입니다. DB 로깅은 계획서 Phase 1 산출물 지연이었으나 **CSV 로깅(T-12)으로 해소**했습니다(아래 범위 축소 참조).
 
 ---
 
@@ -35,7 +35,7 @@ nu=7 nq=7 nbody=8
 **유닛 테스트**
 ```
 $ python -m pytest tests -q
-104 passed, 1 warning in 3.43s
+119 passed, 1 warning in 3.43s
 ```
 (경고 1건은 `starlette.testclient`의 `httpx` deprecation 안내이며 테스트 실패 아님)
 
@@ -72,26 +72,27 @@ C_j1: target=+0.3000 actual=+0.2527 err=-0.0473 force=+0.5670
 
 **실물 설정 ↔ 시뮬 일치**
 ```
-tests/test_real.py::test_config_ranges_match_sim  — PASS (104건 중 1건)
+tests/test_real.py::test_config_ranges_match_sim  — PASS (119건 중 1건)
 ```
 `real/config.json`의 `range`와 시뮬 `ctrlrange`가 자동 검증 중.
 
 ---
 
-## 3. 미달 항목과 사유
+## 3. 계측 레이어 현황과 남은 일
 
-계측 레이어 부재를 숨기지 않고 각 항목을 `docs/task.md`의 작업 항목으로 연결합니다.
+계측·복구·로깅 레이어는 모두 구현되어 `FakeBus` 단위테스트까지 통과합니다. 남은 것은 실물 24h 구동으로 수치를 채우는 검증(Phase 4)과 선택 항목입니다.
 
-| 미달 항목 | 사유 | 연결 작업 |
-| :--- | :--- | :--- |
-| GroupSyncWrite (목표 송신) | 관절별 TxRx 7왕복 구조라 50 Hz에서 지터 증가 여지. 계획서 명시 사항 위반 | T-08 |
-| 50 Hz 주기 루프 + 지터 측정 | 루프 자체가 없음(HTTP 요청 시에만 송신) | T-11 |
-| 패킷 에러율 계측 | 마지막 오류 문자열 1건만 보관, 누적 카운터 없음 | T-10 |
-| 온도/전압 폴링 | 폴링 구간(주소 70~135)에 `present_temperature`(146)·`present_input_voltage`(144)가 빠짐 | T-09 |
-| Reboot 자동 복구 / 가용률 산출 | 오류 감지는 되나 Reboot(0x08) 미구현, 다운타임 로그 없음 | T-13 |
-| DB 로깅 / ERD | 모듈 자체가 없음(`sqlite`/ORM 의존성 0건). **Phase 1 산출물이라 유일한 실제 지연** | T-12 (P2 중 최우선) |
-| 24h 연속 구동 러너 | 미착수 | T-14 |
-| 파지 성공률 자동 집계 | 실물 시험을 사진 기록으로 가볍게 끝내기로 결정, 통계 하네스는 필수 아님 | T-15 (선택) |
+| 항목 | 상태 | 비고 | 연결 작업 |
+| :--- | :--- | :--- | :--- |
+| GroupSyncWrite (목표 송신) | ✅ 구현 | 7왕복 → 1패킷 전환 | T-08 |
+| 패킷 에러율 계측 | ✅ 구현 | 누적 tx/rx 카운터 + `run.csv` 영속화 | T-10, T-12 |
+| 온도/전압 폴링 | ✅ 구현 | `poll_slow`가 1 Hz로 70~146 구간을 읽음(주소 144/146 포함) | T-09 |
+| 50 Hz 루프 + 지터 측정 | ✅ 구현 | 고정 데드라인 루프 + `LoopStats`. 송신은 HTTP 때만(측정만 범위로 합의) | T-11 |
+| CSV 로깅 | ✅ 구현 | `joint_sample`/`error_event`/`run` 3종. SQLite+ERD 대신 CSV로 범위 축소(합의) | T-12 |
+| Reboot 자동 복구 / 가용률 | ✅ 구현 | `Bus.reboot` + 5초 복귀 판정 + 다운타임 누적. reboot 후 설정 재적용 | T-13 |
+| 24h 연속 구동 러너 | ✅ 구현 | `real/endurance.py`, HTTP 제어, 65 °C 자동 중단 | T-14 |
+| **실물 24h 수치 채우기** | ⏳ Phase 4 | 위 레이어로 지터·패킷 에러율·가용률 실측 — 12월 | T-11~T-14 검증 |
+| 파지 성공률 자동 집계 | ⚠ 선택 | 실물 시험을 사진 기록으로 경량화, 통계 하네스는 필수 아님 | T-15 (선택) |
 
 ---
 

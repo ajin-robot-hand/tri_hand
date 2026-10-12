@@ -13,7 +13,7 @@
 | :--- | :--- | :--- |
 | MuJoCo 모델 컴파일 | `mujoco.MjModel.from_xml_path("src/scene.xml")` | 성공, `nu=7 / nq=7 / nbody=8` (7 DOF 일치) |
 | 헤드리스 물리 검증 | `python src/run_sim.py --headless` | 8초 발산 없음, `max|qvel| ≤ 0.95 rad/s` |
-| 유닛 테스트 | `python -m pytest tests` | **106 passed** |
+| 유닛 테스트 | `python -m pytest tests` | **119 passed** |
 | 위치 제어 응답 | `B_j2` 0→1.0 rad 스텝 | 정착 1.0013 rad, **오버슈트 0.2%** (kp=12 / kv=0.5 적정) |
 | 정적 유지 오차 | 전 관절 `ctrl=0`, 중력 −Y | 오차 0.000 rad (링크 축과 중력이 평행해 모멘트 없음) |
 | 실물 설정 ↔ 시뮬 일치 | `tests/test_real.py::test_config_ranges_match_sim` | `config.json` range == `ctrlrange` 자동 검증 중 |
@@ -131,13 +131,18 @@ README는 이를 [issue #7]로 이미 알고 있으나, `run_sim.py` 주석은 �
 
 ### P2 — Phase 4(2026.12) 검증 전까지
 
-- [ ] **T-11** 50 Hz 제어 루프 + 지터 측정 스레드 (`monotonic_ns` 기준 주기 편차 기록). 계획서 판정 조건: 지터 < 2 ms, 누락 프레임 < 0.1%
-- [ ] **T-12** SQLite 로깅 + **DB ERD 문서** (Phase 1 미착수 산출물 → 실제 지연이므로 P2 중 최우선)
-  - 계획서 [Page 5] 샘플링 요구는 *Position / Load / Temperature 1 Hz + 패킷 에러 이벤트 상세*뿐이므로 테이블은 **`joint_sample`(1 Hz) + `error_event` 2개**로 충족. 지터는 별도 테이블 대신 `run` 메타 행에 주기 편차 통계로 적재
-  - *완료 기준:* ERD 1장 + `joint_sample`에 온도가 들어옴(T-09 선행)
-- [ ] **T-13** Dynamixel **Reboot(0x08)** 구현 + Hardware_Error 자동 복구 (5초 내 복귀 성공 판정) + 다운타임 누적 → 가용률 산출
-  - 구현 비용 낮음: SDK에 `PacketHandler.reboot()`가 이미 있고(확인), 오류 감지도 `hw_errors`로 완료돼 있어 `Bus.reboot()` 래퍼 + 복구 루프만 남음
-- [ ] **T-14** 24h 연속 구동 러너 (5분 주기 3종 그립 순환, 정적 30 s / 오픈 90 s 듀티, 온도 65 °C 초과 시 자동 중단)
+- [x] **T-11** 50 Hz 제어 루프 + 지터 측정 (`monotonic_ns` 기준 주기 편차 기록). 계획서 판정 조건: 지터 < 2 ms, 누락 프레임 < 0.1%
+  - `poll_loop`를 고정 데드라인 스케줄러로 바꿔 드리프트를 없애고, `LoopStats`가 매 주기 편차를 0.1 ms 히스토그램으로 누적(24h·50 Hz 샘플 수백만 개라 메모리 고정). `/state`의 `loop`에 `hz/jitter_ms_p95/dropped_frac` 노출
+  - *범위 축소(합의):* 목표 **송신은 지금처럼 HTTP 요청 때만** — 루프는 폴링+지터 측정만. "GroupSyncWrite 50 Hz 상시 구동"은 실물 검증 때 재논의
+- [x] **T-12** ~~SQLite 로깅 + DB ERD 문서~~ → **CSV 로깅**(`real/runlog.py`)으로 범위 축소(합의). Phase 1 산출물 지연 해소
+  - 계획서 [Page 5] 샘플링 요구는 *Position / Load / Temperature 1 Hz + 패킷 에러 이벤트 상세*뿐이므로 append-only CSV 3종으로 충족: `joint_sample.csv`(1 Hz) + `error_event.csv`(통신/HW/Reboot) + `run.csv`(지터·패킷 에러율·가용률 스냅샷, ERD 대신 메타 행)
+  - 서버 `--log DIR`로 opt-in. 매 write flush라 24h 중 크래시해도 측정이 남음(인메모리 카운터 리셋 한계를 영속 로그로 덮음)
+  - *완료 기준:* ~~ERD 1장~~ CSV 스키마 표 + `joint_sample`에 온도가 들어옴(**T-09는 `poll_slow`가 이미 폴링 중이라 충족**)
+- [x] **T-13** Dynamixel **Reboot(0x08)** 구현 + Hardware_Error 자동 복구 (5초 내 복귀 성공 판정) + 다운타임 누적 → 가용률 산출
+  - `Bus.reboot()` 래퍼 + `Hand.check_recovery()`(1 Hz): 장애 감지 → reboot → 복귀 성공/실패 판정, reboot 후 운영 모드·게인·토크·목표 **재설정**(`_restore`). `/state`에 `availability/downtime_s/reboots` 노출, `--no-recover`로 끌 수 있음
+- [x] **T-14** 24h 연속 구동 러너 (`real/endurance.py`, 5분 주기 3종 그립 순환, 정적 30 s / 오픈 90 s 듀티, 온도 65 °C 초과 시 자동 중단)
+  - HTTP로 서버 제어(의존성 없이 stdlib `urllib`), 프리셋은 `/presets`에서 동적으로 읽어 순환. 종료 시 최고 온도·패킷 에러율·지터·가용률 요약 출력
+  - **주의:** T-11~T-14 모두 `FakeBus` 단위 테스트까지만 완료 — 실물 24h 구동·실제 Reboot 검증은 Phase 4(12월) 몫
 - [ ] **T-15** *(선택)* 파지 성공률 자동 집계 스크립트 (시행 기록 → 유형별 성공률·신뢰구간) — 실물 시험을 사진 기록으로 가볍게 끝내기로 했으므로 **필수 아님**. 계획서 `n≥30` 통계를 서류로 요구받을 때만 착수
 
 ---
@@ -147,7 +152,7 @@ README는 이를 [issue #7]로 이미 알고 있으나, `run_sim.py` 주석은 �
 README는 "어떻게 쓰는가"를 담고 있으니, **"계획서 약속을 어디까지 지켰는가"**는 별도 문서로 분리하는 편이 평가자에게 읽히기 좋습니다. 아래 골격을 제안합니다.
 
 1. **평가 지표 추적표** — 계획서 KPI 4개 × (목표 / 측정 정의 / 측정 명령 / 현재값 / 판정 / 근거 파일·커밋)
-2. **달성 근거** — 재현 명령과 그 출력 (XML 컴파일, `pytest 106 passed`, 헤드리스 발산 없음, 스텝 응답 0.2% 오버슈트)
+2. **달성 근거** — 재현 명령과 그 출력 (XML 컴파일, `pytest 119 passed`, 헤드리스 발산 없음, 스텝 응답 0.2% 오버슈트)
 3. **미달 항목과 사유** — 계측 레이어 부재를 숨기지 않고 T-11~T-15로 연결
 4. **리스크 등록부** — ① 완전 오므림 시 A↔B·C 자가 간섭과 `A_j1` 토크 포화 → 과열 위험(issue #7) ② 7왕복 쓰기로 인한 50 Hz 지터 ③ 실물 바깥쪽 가동한계 미측정(합 86° 는 시뮬 합의값일 뿐)
 5. **시뮬 ↔ 실물 대응표** — 같은 API를 쓰지만 **게인 단위가 다름**(시뮬 `kp` N·m/rad vs 실물 Position P Gain 레지스터). 평가자가 가장 오해하기 쉬운 지점이므로 명시

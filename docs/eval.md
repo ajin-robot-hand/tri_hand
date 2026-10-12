@@ -5,6 +5,17 @@
 
 ---
 
+## 개정 이력 (Amendments)
+
+원문은 그대로 두고, 합의된 범위 변경만 아래에 날짜와 함께 기록합니다. 본문에서 변경된 항목에는 `[개정 R1]`처럼 표시했습니다.
+
+| # | 일자 | 변경 | 사유 |
+| :--- | :--- | :--- | :--- |
+| **R1** | 2026-10-12 | **로깅 레이어를 SQLite + DB ERD → CSV(append-only 3종: `joint_sample`/`error_event`/`run`)로 변경.** "DB 저장", "DB ERD 문서화"는 CSV 파일 저장과 CSV 스키마 표로 대체 | 계획서 [Page 5] 샘플링 요구(Position/Load/Temperature 1 Hz + 패킷 에러 이벤트)는 평면 테이블 2개로 충분하고, 관계형 스키마·ERD의 부가가치가 낮음. 매 write flush로 24h 중 크래시에도 측정이 남는 영속성이 핵심이며 이는 CSV로 충족. 구현·근거: `real/runlog.py`, `docs/task.md` T-12 |
+| **R2** | 2026-10-12 | 50 Hz 루프는 **주기 지터 측정 전용**으로 두고, 목표 송신은 HTTP 요청 시에만 GroupSyncWrite로 전송(상시 50 Hz 송신 아님) | 상시 송신은 거동 변경을 수반해 실물 검증 단계에서 재논의가 안전. 측정 수단(`LoopStats`)은 완비. 구현·근거: `docs/task.md` T-11 |
+
+---
+
 ## [Page 2] 프로젝트 개요 (Project Overview)
 
 ### 주요 정보
@@ -15,14 +26,14 @@
 | **구동 방식** | 액추에이터 직접구동 방식 (Direct-Coupled) | 관절 직접 연결, 직접 제어성 확보 |
 | **자유도 구성** | 7 DOF = 손가락 3개 × 2 DOF (MCP + PIP) + 엄지 외전 1 DOF | Power / Pinch / 구형 파지 대응(예상) |
 | **액추에이터 확정** | XL430-W250-T 7축 단일 모델 | 스페어 7개 포함 |
-| **제어 스택** | DYNAMIXEL SDK (Python), DYNAMIXEL Wizard 2.0, GroupSyncWrite / GroupSyncRead | FastAPI + DB 로깅 연동 |
-| **협업 환경** | GitHub, Mock PortHandler, Control Table 레지스터맵, DB ERD 문서화 | |
+| **제어 스택** | DYNAMIXEL SDK (Python), DYNAMIXEL Wizard 2.0, GroupSyncWrite / GroupSyncRead | FastAPI + DB 로깅 연동 `[개정 R1: CSV 로깅]` |
+| **협업 환경** | GitHub, Mock PortHandler, Control Table 레지스터맵, DB ERD 문서화 `[개정 R1: CSV 스키마 표]` | |
 
 ### 목표 지표
 
 | 지표 | 목표값 | 검증 방법 |
 | :--- | :--- | :--- |
-| **동시 제어 주기** | 50 Hz (7관절 GroupSyncWrite 안정 구동) | 주기 지터 로그 DB 저장 확인 |
+| **동시 제어 주기** | 50 Hz (7관절 GroupSyncWrite 안정 구동) | 주기 지터 로그 DB 저장 확인 `[개정 R1: CSV, R2: 측정 전용]` |
 | **파지 성공률** | 90% 이상 (3종 시나리오) | 그립 유형별 반복 파지 통계 |
 | **패킷 에러율** | 0.05% 미만 (24시간 연속 구동 상태) | SDK RX 에러 카운터 회수 |
 | **시스템 가용률** | 99% 이상 (Hardware_Error 자동 복구(Reboot) 포함) | Downtime / Total time 로그 |
@@ -79,7 +90,7 @@
 
 | KPI | 목표 값 | 측정 도구 | 판정 조건 |
 | :--- | :--- | :--- | :--- |
-| **동시 제어 주기** | 50 Hz GroupSyncWrite 안정 구동 | 주기 지터 로그 (µs 단위) → DB | 24h 로그에서 지터 $< 2\text{ms}$, 누락 프레임 $< 0.1\%$ |
+| **동시 제어 주기** | 50 Hz GroupSyncWrite 안정 구동 | 주기 지터 로그 (µs 단위) → DB `[개정 R1: CSV, R2: 측정 전용]` | 24h 로그에서 지터 $< 2\text{ms}$, 누락 프레임 $< 0.1\%$ |
 | **파지 성공률** | $\ge 90\%$ (3종 시나리오) | 그립 유형별 반복 시행 ($n \ge 30$) 통계 | 각 유형별 성공률 $\ge 90\%$ (5초 유지 조건) |
 | **패킷 에러율** | $< 0.05\%$ (24h 연속) | SDK RX Error Counter 회수 | 24h 연속 구동 후 총 패킷 대비 오류 비율 |
 | **시스템 가용률** | $\ge 99\%$ (자동 복구 포함) | Downtime / Total time 로그 | Hardware_Error Reboot 자동 복구 성공 포함 계산 |
@@ -156,7 +167,7 @@
 
 | 단계 | 기간 | 핵심 산출물 |
 | :--- | :--- | :--- |
-| **① 기반** | 2026.07 - 08 | Mock PortHandler, servo_config, Control Table 레지스터맵, DB ERD, CAD 검토 |
+| **① 기반** | 2026.07 - 08 | Mock PortHandler, servo_config, Control Table 레지스터맵, DB ERD `[개정 R1: CSV 스키마 표]`, CAD 검토 |
 | **② 제어 코어** | 2026.08 - 09 | 실기 연동, GroupSyncWrite 50Hz 루프, FK, 1st 프린팅 |
 | **③ HW 통합** | 2026.10 - 11 | 최종 조립·캘리브레이션, 그립 프리셋 UI 기본, 2nd/3rd 프린팅 |
 | **④ 검증** | 2026.12 | 3종 파지 통계, 24h 연속 구동·로깅 리포트 |

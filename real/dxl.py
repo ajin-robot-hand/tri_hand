@@ -134,6 +134,20 @@ class Bus:
         found, result = self.packet.broadcastPing(self.port)
         return {i: v[0] for i, v in found.items()}, result == self._sdk.COMM_RX_CORRUPT
 
+    def reboot(self, dxl_id: int):
+        """Dynamixel Reboot(0x08): 하드웨어 오류 래치를 지우고 모터를 부팅 상태로 되돌림(토크 꺼짐).
+
+        복구 뒤 운영 모드·게인·토크·목표를 다시 써야 함(호출부 Hand._restore가 담당).
+        """
+        self.tx_count += 1
+        result, error = self.packet.reboot(self.port, dxl_id)
+        if result != self._sdk.COMM_SUCCESS:
+            self.rx_error_count += 1
+            raise DxlError(f"ID {dxl_id} reboot 실패: {self.packet.getTxRxResult(result)}")
+        if error:
+            self.rx_error_count += 1
+            raise DxlError(f"ID {dxl_id} reboot 오류 응답: {self.packet.getRxPacketError(error)}")
+
     def read(self, dxl_id: int, name: str) -> int:
         reg = REG[name]
         fn = {1: self.packet.read1ByteTxRx, 2: self.packet.read2ByteTxRx, 4: self.packet.read4ByteTxRx}[reg.size]
