@@ -20,8 +20,8 @@
 graph TD
     UI["웹 대시보드 (src/dashboard.html)<br/>실시간 관절 모니터링 · 개별/전체 토크 스위치 · 프리셋"]
 
-    subgraph Shared_API ["공용 REST API (/status, /target, /torque, /presets, /reset)"]
-        ServerSim["가상 시뮬레이션 서버<br/>(src/server.py)"]
+    subgraph Shared_API ["공용 REST API (/state, /joints, /velocities, /torque, /presets)"]
+        ServerSim["가상 시뮬레이션 서버<br/>(src/server.py)<br/>+ /reset (시뮬 전용)"]
         ServerReal["실물 로봇 제어 서버<br/>(real/server.py)"]
     end
 
@@ -48,7 +48,6 @@ graph TD
 * **3D 물리 시뮬레이션 (MuJoCo)**
   - 3지 7자유도 로봇 손의 정밀 기구학/동역학 모델링 (`hand.xml`, `scene.xml`)
   - 시각용 메쉬(STL)와 충돌용 지오메트리(Primitive) 분리로 빠르고 안정적인 물리 연산
-  - 단계별 MuJoCo 모델링 학습을 위한 `tutorial/` 예제 코드 포함
 * **실물 로봇 하드웨어 인터페이스 (`real/`)**
   - U2D2 인터페이스 및 `dynamixel-sdk`를 통한 7개 모터 동시 제어
   - **하드웨어 진단 도구 (`real/check.py`)**: 전 보레이트 자동 스캔, 영점/방향 실시간 모니터링, 전압·온도·동작 모드 무결성 점검
@@ -213,7 +212,7 @@ uv pip install -r requirements.txt
 
 ## 🤖 실물 하드웨어 연결 및 캘리브레이션 가이드
 
-실물 로봇 손의 모터 ID, 통신 속도, 회전 방향(`sign`), 영점(`zero`)은 [`real/config.json`](file:///home/erdos/workspace/tri-hand/real/config.json)에서 관리합니다.
+실물 로봇 손의 모터 ID, 통신 속도, 회전 방향(`sign`), 영점(`zero`)은 [`real/config.json`](real/config.json)에서 관리합니다.
 
 ### 캘리브레이션 5단계
 
@@ -248,7 +247,7 @@ uv pip install -r requirements.txt
 
 ## 🖥 웹 대시보드 & 프리셋 제어 상세
 
-`src/server.py`(시뮬레이션)와 `real/server.py`(실물)는 같은 대시보드([src/dashboard.html](file:///home/erdos/workspace/tri-hand/src/dashboard.html))를 통해 다음 기능을 제공합니다.
+`src/server.py`(시뮬레이션)와 `real/server.py`(실물)는 같은 대시보드([src/dashboard.html](src/dashboard.html))를 통해 다음 기능을 제공합니다.
 
 * **실시간 모니터링**: 7개 모터(`A_j0`, `A_j1`, `A_j2`, `B_j1`, `B_j2`, `C_j1`, `C_j2`)의 현재 각도, 목표 각도, 속도, 토크, 게인 값 표출
 * **원격 LAN 접속**: `--host 0.0.0.0`으로 실행 시 동일 공유기(LAN) 내의 다른 기기/태블릿에서 `http://<호스트IP>:8000`으로 접속 제어 가능
@@ -258,12 +257,14 @@ uv pip install -r requirements.txt
 
 ### 입력 허용 범위 및 제어 스펙
 
-| 항목 | 허용 범위 | 비고 |
-|---|---|---|
-| **목표 각도** | `A_j0`: ±1.0472 rad (±60°)<br>`A_j1~2, B_j1~2, C_j1~2`: ±1.5708 rad (±90°) | 관절 기구학 동작 범위 (`ctrlrange`) |
-| **kp (P 게인)** | 0 초과 ~ 100 | 실물은 XL430 Position P Gain 레지스터 직접 매핑 |
-| **kv (D 게인)** | 0 ~ 5 | 실물은 XL430 Position D Gain 레지스터 직접 매핑 |
-| **토크 한계** | 0 초과 ~ 1.4 N·m | XL430-W250-T 정격 토크 기준 |
+> ⚠ **시뮬레이션과 실물은 게인의 단위가 다릅니다.** 시뮬 `kp`/`kv`는 MuJoCo position actuator의 `N·m/rad`, `N·m·s/rad` 게인이고, 실물 `kp`/`kv`는 XL430 Position P/D Gain **레지스터 값**(단위 없는 정수)입니다. 같은 숫자를 입력해도 물리적 의미가 다르므로 혼용하지 마세요.
+
+| 항목 | 시뮬레이션 (`src/server.py`) | 실물 (`real/server.py`) | 비고 |
+|---|---|---|---|
+| **목표 각도** | `A_j0`: ±1.0472 rad (±60°)<br>`A_j1~2, B_j1~2, C_j1~2`: ±1.5708 rad (±90°) | 좌동 | 관절 기구학 동작 범위 (`ctrlrange`) |
+| **kp (P 게인)** | 0 초과 ~ 100 | 0 초과 ~ 16383 | 실물은 XL430 Position P Gain 레지스터 범위 (`GAIN_MAX`) |
+| **kv (D 게인)** | 0 ~ 5 | 0 ~ 16383 | 실물은 XL430 Position D Gain 레지스터 범위 (`GAIN_MAX`) |
+| **토크 한계** | 0 초과 ~ 1.4 N·m | 0 초과 ~ 1.4 N·m | XL430-W250-T 정격 토크 기준 |
 
 ---
 
@@ -284,7 +285,7 @@ uv pip install -r requirements.txt
 
 ```
 tri_hand/
-├── docs/               # 이론 배경 학습 자료 및 데모 미디어
+├── docs/               # 개발 계획서(eval.md) · 잔여 작업 점검표(task.md) · 설계 스펙(superpowers/) · 데모 미디어
 ├── src/                # [가상 시뮬레이션] 모델 및 제어 환경
 │   ├── scene.xml       # 전체 시뮬레이션 씬 (바닥, 조명 등)
 │   ├── hand.xml        # 로봇 손 기구학/동역학 MuJoCo 모델
@@ -300,7 +301,6 @@ tri_hand/
 │   ├── check.py        # 하드웨어 무결성 점검 / 보레이트 스캔 / 각도 모니터
 │   └── server.py       # 실물 로봇 HTTP 제어 서버 (대시보드 공용)
 ├── tests/              # API 및 제어 로직 유닛 테스트 (pytest)
-├── tutorial/           # MuJoCo 모델링 기초 단계별 실습 예제
 ├── AGENTS.md           # 에이전트 작업 지침 및 하드웨어 모델링 원칙
 ├── requirements.txt    # 크로스 플랫폼 의존성 목록
 └── README.md           # 프로젝트 안내서
