@@ -15,7 +15,7 @@
 | **구동 방식** | 액추에이터 직접구동 방식 (Direct-Coupled) | 관절 직접 연결, 직접 제어성 확보 |
 | **자유도 구성** | 7 DOF = 손가락 3개 × 2 DOF (MCP + PIP) + 엄지 외전 1 DOF | Power / Pinch / 구형 파지 대응(예상) |
 | **액추에이터 확정** | XL430-W250-T 7축 단일 모델 | 스페어 7개 포함 |
-| **제어 스택** | DYNAMIXEL SDK (Python), DYNAMIXEL Wizard 2.0, GroupSyncWrite / GroupBulkRead | FastAPI + DB 로깅 연동 |
+| **제어 스택** | DYNAMIXEL SDK (Python), DYNAMIXEL Wizard 2.0, GroupSyncWrite / GroupSyncRead | FastAPI + DB 로깅 연동 |
 | **협업 환경** | GitHub, Mock PortHandler, Control Table 레지스터맵, DB ERD 문서화 | |
 
 ### 목표 지표
@@ -23,13 +23,13 @@
 | 지표 | 목표값 | 검증 방법 |
 | :--- | :--- | :--- |
 | **동시 제어 주기** | 50 Hz (7관절 GroupSyncWrite 안정 구동) | 주기 지터 로그 DB 저장 확인 |
-| **파지 성공률** | 90% 이상 (3종 시나리오) | 권종별 반복 파지 통계 |
+| **파지 성공률** | 90% 이상 (3종 시나리오) | 그립 유형별 반복 파지 통계 |
 | **패킷 에러율** | 0.05% 미만 (24시간 연속 구동 상태) | SDK RX 에러 카운터 회수 |
 | **시스템 가용률** | 99% 이상 (Hardware_Error 자동 복구(Reboot) 포함) | Downtime / Total time 로그 |
 
 > **전제 요약**
 > * 보드레이트 1Mbps 및 USB latency 1ms 설정 필수
-> * XL430-W250-T 전축 단일 모델화로 스페어 관리·제어 테이블·펌웨어 단일화. 
+> * XL430-W250-T 전 축 단일 모델화로 스페어 관리·제어 테이블·펌웨어 단일화. 
 > * 파지 대상 물체는 XL430의 힘 버짓(Force Budget) 안으로 정의한다.
 
 ---
@@ -80,7 +80,7 @@
 | KPI | 목표 값 | 측정 도구 | 판정 조건 |
 | :--- | :--- | :--- | :--- |
 | **동시 제어 주기** | 50 Hz GroupSyncWrite 안정 구동 | 주기 지터 로그 (µs 단위) → DB | 24h 로그에서 지터 $< 2\text{ms}$, 누락 프레임 $< 0.1\%$ |
-| **파지 성공률** | $\ge 90\%$ (3종 시나리오) | 권종별 반복 시행 ($n \ge 30$) 통계 | 각 유형별 성공률 $\ge 90\%$ (5초 유지 조건) |
+| **파지 성공률** | $\ge 90\%$ (3종 시나리오) | 그립 유형별 반복 시행 ($n \ge 30$) 통계 | 각 유형별 성공률 $\ge 90\%$ (5초 유지 조건) |
 | **패킷 에러율** | $< 0.05\%$ (24h 연속) | SDK RX Error Counter 회수 | 24h 연속 구동 후 총 패킷 대비 오류 비율 |
 | **시스템 가용률** | $\ge 99\%$ (자동 복구 포함) | Downtime / Total time 로그 | Hardware_Error Reboot 자동 복구 성공 포함 계산 |
 
