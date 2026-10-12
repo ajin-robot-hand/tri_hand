@@ -97,17 +97,17 @@ README는 이를 [issue #7]로 이미 알고 있으나, `run_sim.py` 주석은 �
 
 ### P0 — 오늘·내일 (문서 정합성 + 평가 서류, 코드 리스크 없음)
 
-- [ ] **T-01** `README.md` 사실 오류 5건 수정 (D-05)
-  - `tutorial/` 언급 2곳 삭제, `file:///home/erdos/...` → 리포 상대경로, 실물 `kp` 범위 0~16383로 정정, Mermaid API 이름을 `/state`·`/joints`로, `docs/` 설명 현실화
-  - *완료 기준:* README에 등장하는 모든 경로·엔드포인트·수치가 리포지토리와 일치
-- [ ] **T-02** `docs/evaluation.md` 신설 — **평가 요소 정리 서류** (§4 구성안 참조)
-  - *완료 기준:* 계획서 4개 KPI마다 ①측정 정의 ②측정 도구/명령 ③현재 달성도 ④판정 근거 파일이 한 줄로 추적됨
-- [ ] **T-03** `src/run_sim.py:18` 주석 정정 + 간섭 수치 명문화 (D-01)
+- [x] **T-01** `README.md` 사실 오류 5건 수정 (D-05)
+  - `tutorial/` 언급 2곳 삭제, `file:///home/erdos/...` → 리포 상대경로, 실물/시뮬 `kp`·`kv` 범위를 열로 분리해 정정(실물 0~16383, 시뮬 kp 0~100/kv 0~5), Mermaid API 이름을 `/state`·`/joints`·`/velocities`·`/torque`·`/presets`로(+`/reset`은 시뮬 전용 표기), `docs/` 설명 현실화
+  - *완료 기준:* README에 등장하는 모든 경로·엔드포인트·수치가 리포지토리와 일치 — 충족 (commit `28da75d`)
+- [x] **T-02** `docs/evaluation.md` 신설 — **평가 요소 정리 서류** (§4 구성안 참조)
+  - *완료 기준:* 계획서 4개 KPI마다 ①측정 정의 ②측정 도구/명령 ③현재 달성도 ④판정 근거 파일이 한 줄로 추적됨 — 충족, §4~6(리스크 등록부·시뮬↔실물 대응표·범위 밖 선언)까지 포함 (commit `8cdfbd2`)
+- [x] **T-03** `src/run_sim.py:18` 주석 정정 + 간섭 수치 명문화 (D-01)
   - 주석을 "완전 오므림에서 A가 B·C와 접촉하며 `A_j1`이 토크 포화된다(issue #7)"로 교체하고, `docs/evaluation.md`의 리스크 항목에 과열 위험으로 등재
-  - *완료 기준:* 주석과 실측(`ncon=4`, `A_j1` −1.4 N·m)이 모순되지 않음
-- [ ] **T-04** `docs/eval.md` 용어 정정 (D-06) — "권종별"→"그립 유형별", `GroupBulkRead`→`GroupSyncRead`, "전축"→"전 축"
-- [ ] **T-07** `requirements.txt`에 테스트 의존성 분리 추가 (D-07) — `httpx`, `pytest` (또는 `requirements-dev.txt`)
-  - *완료 기준:* 새 venv에서 `pip install -r requirements.txt && pytest tests` → 104 passed
+  - *완료 기준:* 주석과 실측(`ncon=4`, `A_j1` −1.4 N·m)이 모순되지 않음 — 충족, 헤드리스로 재측정(`ncon=4`, 오차 −0.125 rad)해 반영 (commit `0f1f6fe`)
+- [x] **T-04** `docs/eval.md` 용어 정정 (D-06) — "권종별"→"그립 유형별", `GroupBulkRead`→`GroupSyncRead`, "전축"→"전 축" (commit `f094492`, KPI 수치는 변경하지 않음)
+- [x] **T-07** `requirements.txt`에 테스트 의존성 분리 추가 (D-07) — `httpx`, `pytest` (또는 `requirements-dev.txt`)
+  - *완료 기준:* 새 venv에서 `pip install -r requirements.txt && pytest tests` → 104 passed — 충족, `requirements-dev.txt` 신설(`-r requirements.txt`가 아니라 별도 파일로 분리, README에 두 파일 함께 설치하도록 안내) (commit `9f6dd5f`)
 
 > **제외됨 (2026-10-12 판단):** 3종 그립 프리셋 정의와 파지 성공률 시험 절차서는 작업 목록에서 **뺍니다.**
 > - 프리셋은 **이미 실물에서 3종 모두 정의·동작 확인 완료**. 저장 위치인 `presets.json`은 `.gitignore` 대상(`.gitignore:21-22`)이라 리포지토리에 보이지 않을 뿐입니다.
