@@ -21,5 +21,8 @@ Thumbs.db
 src/presets.json
 real/presets.json
 
+# CSV 로깅 출력 (T-12, --log DIR)
+logs/
+
 # MediaPipe 손 인식 모델 (teleop.py가 처음 실행 때 내려받음)
 src/models/

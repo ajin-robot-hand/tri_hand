@@ -1,6 +1,8 @@
 <mujoco model="tri_hand">
   <compiler angle="radian" meshdir="meshes" autolimits="true"/>
   <option gravity="0 -9.81 0" integrator="implicitfast" timestep="0.002"/>
+<!-- 실물 세계와 시뮬레이션 세계의 단위계와 중력 방향 일치화-->
+
 
   <asset>
     <mesh name="palm_base" file="palm_base.stl" scale="0.001 0.001 0.001"/>
@@ -11,7 +13,7 @@
 
   <default>
     <joint type="hinge" axis="1 0 0" range="-1.5708 1.5708" limited="true" damping="0.15" armature="0.01"/>
-
+<!-- range = -90 ~ +90 -->
     <!-- 시각용: 원본 STL. 충돌 없음, group 1 -->
     <default class="visual">
       <geom type="mesh" density="0" contype="0" conaffinity="0" group="1"/>
@@ -43,7 +45,7 @@
     <!-- ===== Finger A (Swivel + 2-Link Thumb) ===== -->
     <!-- 7번째 액추에이터: 엄지 요/대립 관절 (회전축: Y축, 피벗: 모터 혼 중심) -->
     <body name="A_base" pos="0.02975 -0.07078 0.06011">
-      <joint name="A_j0" axis="0 1 0" pos="0 0 0" range="-1.0472 1.0472"/>
+      <joint name="A_j0" axis="0 1 0" pos="0 0 0" range="-1.0472 1.0472"/> <!-- -60 ~ 60-->
       <inertial pos="0 0.025 0.025" mass="0.05" diaginertia="1.5e-05 1.5e-05 1.5e-05"/>
       <geom name="thumb_mount" class="visual" mesh="thumb_mount"
             pos="-0.02975 0.07078 -0.06011" rgba="0.95 0.75 0.15 1"/>

@@ -33,18 +33,26 @@ class FakeBus:
         self.regs = {i: {"torque_enable": 1, "operating_mode": 16, "min_position_limit": 0,
                          "max_position_limit": 4095, "position_p_gain": 640, "position_d_gain": 0,
                          "goal_pwm": 885, "velocity_limit": 265, "present_position": 2048, "goal_position": 2048,
-                         "goal_velocity": 0, "profile_velocity": 0, "present_velocity": 0, "present_load": 0, "hardware_error_status": 0}
+                         "goal_velocity": 0, "profile_velocity": 0, "present_velocity": 0, "present_load": 0,
+                         "hardware_error_status": 0, "present_input_voltage": 111, "present_temperature": 25}
                      for i in ids}
         self.writes = []
+        self.sync_writes = []   # (name, {id: value}) — GroupSyncWrite 1건
+        self.tx_count = 0
+        self.rx_error_count = 0
         self.fail = False
 
     def read(self, i, name):
+        self.tx_count += 1
         if self.fail:
+            self.rx_error_count += 1
             raise DxlError(f"ID {i} {name} 읽기 실패")
         return self.regs[i][name]
 
     def write(self, i, name, value):
+        self.tx_count += 1
         if self.fail:
+            self.rx_error_count += 1
             raise DxlError(f"ID {i} {name} 쓰기 실패")
         r = self.regs[i]
         if name in ("operating_mode", "min_position_limit", "max_position_limit") and r["torque_enable"]:
@@ -56,10 +64,38 @@ class FakeBus:
         if r["torque_enable"] and r["operating_mode"] == 3:
             r["present_position"] = r["goal_position"]
 
+    def reboot(self, i):
+        """실물 Reboot 흉내: 하드웨어 오류 래치를 지우고 토크를 끔(부팅 상태)."""
+        self.tx_count += 1
+        if self.fail:
+            self.rx_error_count += 1
+            raise DxlError(f"ID {i} reboot 실패")
+        self.regs[i]["hardware_error_status"] = 0
+        self.regs[i]["torque_enable"] = 0
+        self.reboots = getattr(self, "reboots", [])
+        self.reboots.append(i)
+
     def sync_read(self, ids, first, last):
+        self.tx_count += 1
+        if self.fail:
+            self.rx_error_count += 1
+            raise DxlError(f"일괄 읽기 실패 ({first}~{last})")
         start, end = REG[first].addr, REG[last].addr + REG[last].size
         names = [n for n, r in REG.items() if start <= r.addr and r.addr + r.size <= end]
-        return {i: {n: self.read(i, n) for n in names} for i in ids}
+        return {i: {n: self.regs[i][n] for n in names} for i in ids}
+
+    def sync_write(self, name, values):
+        """GroupSyncWrite 흉내: 응답 없는 패킷 1건으로 여러 id에 같은 레지스터를 씀."""
+        self.tx_count += 1
+        if self.fail:
+            self.rx_error_count += 1
+            raise DxlError(f"{name} 일괄 쓰기 실패")
+        self.sync_writes.append((name, dict(values)))
+        for i, v in values.items():
+            r = self.regs[i]
+            r[name] = v
+            if name == "goal_position" and r["torque_enable"] and r["operating_mode"] == 3:
+                r["present_position"] = v   # 실물처럼 위치 모드 + 토크 켜짐이면 즉시 추종
 
 
 @pytest.fixture
@@ -175,16 +211,52 @@ def test_preset_apply_writes_gains_and_pwm(bus, client):
 
 
 def test_poll_errors(bus):
+    """poll()은 20 ms 핫루프(부하/속도/위치)만, poll_slow()는 1 Hz(온도/전압/하드웨어 오류)만 갱신."""
     hand = server.Hand(bus, CFG)
-    bus.regs[ID("A_j0")]["hardware_error_status"] = 0b100000
     bus.regs[ID("A_j0")]["present_load"] = -500
     hand.poll()
+    assert hand.state()["forces"]["A_j0"] == pytest.approx(-0.7)
+
+    bus.regs[ID("A_j0")]["hardware_error_status"] = 0b100000
+    bus.regs[ID("A_j0")]["present_temperature"] = 58
+    bus.regs[ID("A_j0")]["present_input_voltage"] = 115
+    hand.poll_slow()
     s = hand.state()
-    assert s["hw_errors"]["A_j0"] == ["과부하"] and s["forces"]["A_j0"] == pytest.approx(-0.7)
+    assert s["hw_errors"]["A_j0"] == ["과부하"]
+    assert s["temperatures"]["A_j0"] == 58 and s["voltages"]["A_j0"] == pytest.approx(11.5)
+
     bus.fail = True
     hand.poll()
+    hand.poll_slow()
     s = hand.state()
     assert s["comm_error"] and s["hw_errors"]["A_j0"] == ["과부하"]   # 이전 값 유지
+
+
+def test_targets_sent_as_single_sync_write(bus, client):
+    """GroupSyncWrite로 7관절을 1패킷에 보냄 — 관절별 개별 goal_position 쓰기(TxRx 왕복)는 없어야 함."""
+    client.post("/torque", json={"enabled": True})
+    bus.writes.clear()
+    bus.sync_writes.clear()
+    r = client.post("/joints", json={n: 0.1 for n in CFG.joints}).json()
+    assert len(bus.sync_writes) == 1
+    name, values = bus.sync_writes[0]
+    assert name == "goal_position" and set(values) == {j.id for j in CFG.joints.values()}
+    assert not any(w[1] == "goal_position" for w in bus.writes)   # 개별 왕복 경로를 안 탐
+    assert all(v == pytest.approx(0.1, abs=2e-3) for v in r["applied"].values())
+
+
+def test_packet_stats_exposed_in_state(bus, client):
+    client.post("/torque", json={"enabled": True})
+    before = client.get("/state").json()["packets"]
+    client.post("/joints", json={"A_j1": 0.1})
+    after = client.get("/state").json()["packets"]
+    assert after["tx"] > before["tx"] and after["rx_errors"] == 0
+
+    bus.fail = True
+    r = client.post("/joints", json={"A_j1": 0.2})
+    assert r.status_code == 502
+    bus.fail = False
+    assert client.get("/state").json()["packets"]["rx_errors"] >= 1
 
 
 def test_comm_failure_returns_502(bus, client):
@@ -208,6 +280,119 @@ def test_home_moves_all_joints_to_zero_with_torque_on(bus):
         assert r["torque_enable"] == 1 and r["goal_position"] == j.zero and hand.servos[n].torque
         assert r["profile_velocity"] == 0   # 이동 뒤 원래 값으로 되돌림
     assert (ID("C_j1"), "profile_velocity", round(server.HOME_SPEED / VEL_UNIT)) in bus.writes
+
+
+def test_loop_stats_in_state(client):
+    s = client.get("/state").json()
+    assert "loop" in s and s["loop"]["samples"] == 0 and s["loop"]["dropped_frac"] == 0.0
+
+
+def test_loop_stats_jitter_and_dropped_frames():
+    period = 0.02   # 50 Hz
+    stats = server.LoopStats(period)
+    p = round(period * 1e9)
+    now = 1_000_000_000
+    stats.tick(now)                       # 첫 tick은 기준점만
+    for _ in range(100):
+        now += p + 500_000               # 매 주기 +0.5 ms 편차 (정상 범위)
+        stats.tick(now)
+    now += round(p * 2.0)                 # 한 번 크게 밀림 → 누락 프레임 1
+    stats.tick(now)
+    s = stats.summary()
+    assert s["samples"] == 101
+    assert s["dropped_frames"] == 1
+    assert s["dropped_frac"] == pytest.approx(1 / 101)
+    assert 0.4 < s["jitter_ms_mean"] < 1.0   # 대부분 0.5 ms 편차
+    assert s["jitter_ms_max"] == pytest.approx(period * 1000, abs=0.2)   # 2.0배 밀린 주기 = +20 ms 편차
+    assert s["hz"] == pytest.approx(50, rel=0.1)
+
+
+def test_loop_stats_reset():
+    stats = server.LoopStats(0.02)
+    stats.tick(0)
+    stats.tick(20_000_000)
+    assert stats.summary()["samples"] == 1
+    stats.reset()
+    assert stats.summary()["samples"] == 0
+
+
+def test_recovery_reboots_and_counts_success(bus):
+    hand = server.Hand(bus, CFG)
+    hand.t0 = 99.0                               # 주입하는 now와 같은 시간축으로 맞춤
+    hand.servos["A_j0"].torque = True            # 복구 후 토크/목표 재설정 확인용
+    hand.servos["A_j0"].target = 0.2
+    bus.regs[ID("A_j0")]["hardware_error_status"] = 0b100000   # 과부하
+    hand.poll_slow()
+    events = hand.check_recovery(now=100.0)       # 장애 감지 → reboot 1회
+    assert any(e["kind"] == "reboot" and e["joint"] == "A_j0" for e in events)
+    assert ID("A_j0") in bus.reboots and hand.reboots["attempts"] == 1
+
+    hand.poll_slow()                              # reboot로 오류 지워짐
+    events = hand.check_recovery(now=102.0)       # 2초 < 5초 → 성공
+    assert any(e["kind"] == "recover_ok" for e in events)
+    assert hand.reboots["successes"] == 1 and hand.reboots["failures"] == 0
+    assert bus.regs[ID("A_j0")]["torque_enable"] == 1     # 재설정으로 토크 복원
+    av = hand.availability(now=102.0)            # t0=99 → total=3s, downtime=2s
+    assert av["downtime_s"] == pytest.approx(2.0) and av["availability"] == pytest.approx(1 / 3)
+
+
+def test_recovery_marks_failure_after_timeout(bus):
+    hand = server.Hand(bus, CFG)
+    bus.regs[ID("B_j1")]["hardware_error_status"] = 0b100000
+    hand.poll_slow()
+    hand.check_recovery(now=100.0)                # 장애 시작 + reboot(오류 지움)
+    bus.regs[ID("B_j1")]["hardware_error_status"] = 0b100000   # 복구 안 됨(재발)
+    hand.poll_slow()
+    events = hand.check_recovery(now=106.0)       # 6초 > 5초 → 실패 1회
+    assert any(e["kind"] == "recover_failed" for e in events)
+    assert hand.reboots["failures"] == 1
+
+
+def test_no_auto_recover_detects_but_does_not_reboot(bus):
+    hand = server.Hand(bus, CFG, auto_recover=False)
+    bus.regs[ID("C_j2")]["hardware_error_status"] = 0b100000
+    hand.poll_slow()
+    hand.check_recovery(now=100.0)
+    assert not getattr(bus, "reboots", []) and hand.reboots["attempts"] == 0
+    assert hand.state()["hw_errors"]["C_j2"] == ["과부하"]   # 감지는 됨
+
+
+def test_availability_full_when_no_faults(client):
+    s = client.get("/state").json()
+    assert s["availability"] == 1.0 and s["downtime_s"] == 0.0
+    assert s["reboots"] == {"attempts": 0, "successes": 0, "failures": 0}
+
+
+def test_csv_logging_writes_samples_and_events(bus, tmp_path):
+    import csv
+    import importlib.util as _u
+    _s = _u.spec_from_file_location("runlog", ROOT / "real" / "runlog.py")
+    runlog = _u.module_from_spec(_s)
+    _s.loader.exec_module(runlog)
+
+    hand = server.Hand(bus, CFG)
+    hand.logger = runlog.CsvLogger(tmp_path / "run")
+
+    bus.regs[ID("A_j0")]["present_temperature"] = 40
+    hand.poll()
+    hand.poll_slow()                       # 1 Hz 샘플 1묶음(관절 7행)
+    hand.poll_slow()                       # 2묶음
+
+    bus.regs[ID("A_j0")]["hardware_error_status"] = 0b100000
+    hand.poll_slow()
+    hand.check_recovery(now=10.0)          # reboot 이벤트 1건
+    hand.log_run_summary()
+    hand.logger.close()
+
+    rows = list(csv.DictReader(open(tmp_path / "run" / "joint_sample.csv")))
+    assert len(rows) == 3 * len(CFG.joints)          # poll_slow 3회 × 7관절
+    assert any(r["joint"] == "A_j0" and r["temperature_c"] == "40" for r in rows)
+
+    errs = list(csv.DictReader(open(tmp_path / "run" / "error_event.csv")))
+    assert any(e["kind"] == "reboot" and e["joint"] == "A_j0" for e in errs)
+
+    run = list(csv.DictReader(open(tmp_path / "run" / "run.csv")))
+    assert run and "packet_error_rate" in run[0] and "availability" in run[0]
 
 
 def test_home_reports_joints_that_did_not_arrive(bus):

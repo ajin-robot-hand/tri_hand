@@ -1,0 +1,5 @@
+# tri_hand 테스트 전용 의존성 (pytest tests 실행에만 필요)
+# 설치: pip install -r requirements.txt -r requirements-dev.txt
+
+pytest>=8.0
+httpx>=0.27   # fastapi.testclient가 요구

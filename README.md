@@ -20,8 +20,8 @@
 graph TD
     UI["웹 대시보드 (src/dashboard.html)<br/>실시간 관절 모니터링 · 개별/전체 토크 스위치 · 프리셋"]
 
-    subgraph Shared_API ["공용 REST API (/status, /target, /torque, /presets, /reset)"]
-        ServerSim["가상 시뮬레이션 서버<br/>(src/server.py)"]
+    subgraph Shared_API ["공용 REST API (/state, /joints, /velocities, /torque, /presets)"]
+        ServerSim["가상 시뮬레이션 서버<br/>(src/server.py)<br/>+ /reset (시뮬 전용)"]
         ServerReal["실물 로봇 제어 서버<br/>(real/server.py)"]
     end
 
@@ -48,11 +48,14 @@ graph TD
 * **3D 물리 시뮬레이션 (MuJoCo)**
   - 3지 7자유도 로봇 손의 정밀 기구학/동역학 모델링 (`hand.xml`, `scene.xml`)
   - 시각용 메쉬(STL)와 충돌용 지오메트리(Primitive) 분리로 빠르고 안정적인 물리 연산
-  - 단계별 MuJoCo 모델링 학습을 위한 `tutorial/` 예제 코드 포함
 * **실물 로봇 하드웨어 인터페이스 (`real/`)**
-  - U2D2 인터페이스 및 `dynamixel-sdk`를 통한 7개 모터 동시 제어
+  - U2D2 인터페이스 및 `dynamixel-sdk`를 통한 7개 모터 동시 제어 (목표 송신은 `GroupSyncWrite` 1패킷)
   - **하드웨어 진단 도구 (`real/check.py`)**: 전 보레이트 자동 스캔, 영점/방향 실시간 모니터링, 전압·온도·동작 모드 무결성 점검
   - **안전 기능 내장**: 가동 범위 초과 관절 토크 보호(409), 서버 시작 시 부드러운 0 rad 안전 Homing (0.5 rad/s)
+* **계측·복구·로깅 레이어 (`real/`, 평가 KPI 대응)**
+  - 50 Hz 고정 데드라인 제어 루프 + 지터 측정, 패킷 TX/RX 에러 누적 카운터 (`/state`에 `loop`·`packets` 노출)
+  - `Hardware_Error` 자동 Reboot 복구(모드/게인/토크/목표 재적용) 및 가용률·다운타임 집계
+  - CSV 로깅(`real/runlog.py`: 1 Hz 샘플·에러 이벤트·런 요약)과 24h 내구 구동 러너(`real/endurance.py`, 65 °C 자동 중단)
 * **카메라 원격 조종 (`src/teleop.py`)**
   - 일반 웹캠으로 사람 손을 인식해 로봇 손가락을 실시간으로 따라 움직임 (데이터 글러브 불필요)
   - 대시보드와 같은 API로 목표를 보내므로 시뮬레이션·실물 어느 서버에든 그대로 연결
@@ -213,7 +216,7 @@ uv pip install -r requirements.txt
 
 ## 🤖 실물 하드웨어 연결 및 캘리브레이션 가이드
 
-실물 로봇 손의 모터 ID, 통신 속도, 회전 방향(`sign`), 영점(`zero`)은 [`real/config.json`](file:///home/erdos/workspace/tri-hand/real/config.json)에서 관리합니다.
+실물 로봇 손의 모터 ID, 통신 속도, 회전 방향(`sign`), 영점(`zero`)은 [`real/config.json`](real/config.json)에서 관리합니다.
 
 ### 캘리브레이션 5단계
 
@@ -248,7 +251,7 @@ uv pip install -r requirements.txt
 
 ## 🖥 웹 대시보드 & 프리셋 제어 상세
 
-`src/server.py`(시뮬레이션)와 `real/server.py`(실물)는 같은 대시보드([src/dashboard.html](file:///home/erdos/workspace/tri-hand/src/dashboard.html))를 통해 다음 기능을 제공합니다.
+`src/server.py`(시뮬레이션)와 `real/server.py`(실물)는 같은 대시보드([src/dashboard.html](src/dashboard.html))를 통해 다음 기능을 제공합니다.
 
 * **실시간 모니터링**: 7개 모터(`A_j0`, `A_j1`, `A_j2`, `B_j1`, `B_j2`, `C_j1`, `C_j2`)의 현재 각도, 목표 각도, 속도, 토크, 게인 값 표출
 * **원격 LAN 접속**: `--host 0.0.0.0`으로 실행 시 동일 공유기(LAN) 내의 다른 기기/태블릿에서 `http://<호스트IP>:8000`으로 접속 제어 가능
@@ -258,12 +261,14 @@ uv pip install -r requirements.txt
 
 ### 입력 허용 범위 및 제어 스펙
 
-| 항목 | 허용 범위 | 비고 |
-|---|---|---|
-| **목표 각도** | `A_j0`: ±1.0472 rad (±60°)<br>`A_j1~2, B_j1~2, C_j1~2`: ±1.5708 rad (±90°) | 관절 기구학 동작 범위 (`ctrlrange`) |
-| **kp (P 게인)** | 0 초과 ~ 100 | 실물은 XL430 Position P Gain 레지스터 직접 매핑 |
-| **kv (D 게인)** | 0 ~ 5 | 실물은 XL430 Position D Gain 레지스터 직접 매핑 |
-| **토크 한계** | 0 초과 ~ 1.4 N·m | XL430-W250-T 정격 토크 기준 |
+> ⚠ **시뮬레이션과 실물은 게인의 단위가 다릅니다.** 시뮬 `kp`/`kv`는 MuJoCo position actuator의 `N·m/rad`, `N·m·s/rad` 게인이고, 실물 `kp`/`kv`는 XL430 Position P/D Gain **레지스터 값**(단위 없는 정수)입니다. 같은 숫자를 입력해도 물리적 의미가 다르므로 혼용하지 마세요.
+
+| 항목 | 시뮬레이션 (`src/server.py`) | 실물 (`real/server.py`) | 비고 |
+|---|---|---|---|
+| **목표 각도** | `A_j0`: ±1.0472 rad (±60°)<br>`A_j1~2, B_j1~2, C_j1~2`: ±1.5708 rad (±90°) | 좌동 | 관절 기구학 동작 범위 (`ctrlrange`) |
+| **kp (P 게인)** | 0 초과 ~ 100 | 0 초과 ~ 16383 | 실물은 XL430 Position P Gain 레지스터 범위 (`GAIN_MAX`) |
+| **kv (D 게인)** | 0 ~ 5 | 0 ~ 16383 | 실물은 XL430 Position D Gain 레지스터 범위 (`GAIN_MAX`) |
+| **토크 한계** | 0 초과 ~ 1.4 N·m | 0 초과 ~ 1.4 N·m | XL430-W250-T 정격 토크 기준 |
 
 ---
 
@@ -280,11 +285,28 @@ uv pip install -r requirements.txt
 
 ---
 
+## 📊 계측 로깅 및 24h 내구 검증
+
+실물 서버를 `--log` 옵션으로 띄우면 50 Hz 루프 지터, 패킷 에러율, 가용률, 1 Hz 관절 샘플이 CSV로 남습니다. 여기에 내구 러너를 붙이면 3종 그립을 순환하며 장시간 구동 수치를 수집합니다.
+
+```bash
+# 1) CSV 로깅을 켜고 실물 서버 실행 (logs/<타임스탬프>/ 에 기록)
+python real/server.py --log logs
+
+# 2) 다른 터미널에서 24h 내구 구동 러너 실행 (65 °C 초과 시 자동 중단)
+python real/endurance.py --hours 24
+```
+
+- `joint_sample.csv`(1 Hz 샘플), `error_event.csv`(통신·하드웨어 오류·Reboot), `run.csv`(지터·패킷 에러율·가용률 스냅샷 및 종료 요약) 3종이 생성됩니다.
+- 4대 KPI(제어 주기 50 Hz, 파지 성공률, 패킷 에러율, 가용률)의 목표·측정 정의·현재 상태는 [docs/evaluation.md](docs/evaluation.md)에서 추적합니다. 측정/복구/로깅 레이어는 구현·단위테스트 완료 상태이며, 실물 24h 수치 채우기는 검증 단계(Phase 4) 작업입니다.
+
+---
+
 ## 📁 프로젝트 구조
 
 ```
 tri_hand/
-├── docs/               # 이론 배경 학습 자료 및 데모 미디어
+├── docs/               # 개발 계획서(eval.md) · 평가 지표 추적(evaluation.md) · 잔여 작업 점검표(task.md) · 설계 스펙(superpowers/) · 데모 미디어
 ├── src/                # [가상 시뮬레이션] 모델 및 제어 환경
 │   ├── scene.xml       # 전체 시뮬레이션 씬 (바닥, 조명 등)
 │   ├── hand.xml        # 로봇 손 기구학/동역학 MuJoCo 모델
@@ -296,11 +318,14 @@ tri_hand/
 ├── real/               # [실물 로봇 제어] U2D2 + XL430 하드웨어 환경
 │   ├── config.json     # 모터 ID, 통신 속도, zero, sign, 관절 범위 설정
 │   ├── config.py       # 하드웨어 설정 로더 및 유효성 검증
-│   ├── dxl.py          # Dynamixel SDK 래퍼 (tick ↔ rad 변환)
+│   ├── dxl.py          # Dynamixel SDK 래퍼 (tick ↔ rad 변환, GroupSyncRead/Write)
 │   ├── check.py        # 하드웨어 무결성 점검 / 보레이트 스캔 / 각도 모니터
-│   └── server.py       # 실물 로봇 HTTP 제어 서버 (대시보드 공용)
+│   ├── calibrate.py    # 관절별 모터 ID·회전 방향(sign) 자동 탐색
+│   ├── center.py       # 현재 자세를 0 rad로 설정 (Homing Offset 보정)
+│   ├── runlog.py       # CSV 로깅 (관절 샘플 · 에러 이벤트 · 런 요약)
+│   ├── endurance.py    # 24h 내구 구동 러너 (HTTP 제어, 65 °C 자동 중단)
+│   └── server.py       # 실물 로봇 HTTP 제어 서버 (대시보드 공용, --log로 CSV 계측)
 ├── tests/              # API 및 제어 로직 유닛 테스트 (pytest)
-├── tutorial/           # MuJoCo 모델링 기초 단계별 실습 예제
 ├── AGENTS.md           # 에이전트 작업 지침 및 하드웨어 모델링 원칙
 ├── requirements.txt    # 크로스 플랫폼 의존성 목록
 └── README.md           # 프로젝트 안내서
@@ -311,6 +336,6 @@ tri_hand/
 ## 🧪 테스트 실행
 
 ```bash
-pip install pytest httpx
+pip install -r requirements.txt -r requirements-dev.txt
 python -m pytest tests
 ```
