@@ -311,6 +311,6 @@ tri_hand/
 ## 🧪 테스트 실행
 
 ```bash
-pip install pytest httpx
+pip install -r requirements.txt -r requirements-dev.txt
 python -m pytest tests
 ```
