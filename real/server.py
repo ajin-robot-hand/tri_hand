@@ -664,51 +664,53 @@ def main():
     cfg = cfgmod.load(args.config)
     with Bus(pick_port(args.port, cfg.port), cfg.baudrate) as bus:
         hand = Hand(bus, cfg, auto_recover=not args.no_recover)
-        if args.log:
-            import runlog
-            run_dir = runlog.new_run_dir(args.log)
-            hand.logger = runlog.CsvLogger(run_dir)
-            print(f"CSV 로깅: {run_dir}")
-        if args.no_home:
-            print("모든 관절 토크 꺼짐, 위치 모드. 대시보드에서 토크를 켜세요")
-        else:
-            print(f"전 관절 토크 켜고 0 rad(zero tick)로 이동 중 ({HOME_SPEED} rad/s)...")
-            far = hand.home()
-            if far:
-                print(f"⚠ {HOME_TIMEOUT:.0f}초 안에 0 rad에 도착하지 못함 (토크는 켜진 채 목표 0 유지): "
-                      f"{', '.join(f'{n} {q:+.2f} rad' for n, q in far.items())}")
-            else:
-                print("모든 관절 0 rad 도착, 토크 켜짐")
-
         stop = threading.Event()
-
-        def poll_loop():
-            """고정 데드라인으로 POLL_PERIOD마다 돈다(드리프트 누적 없음). 매 주기 시작 시각을
-            LoopStats에 넣어 50 Hz 주기 편차(지터)와 누락 프레임을 집계한다(T-11)."""
-            period_ns = round(POLL_PERIOD * 1e9)
-            next_ns = time.monotonic_ns()
-            tick = 0
-            while not stop.is_set():
-                hand.loop_stats.tick(time.monotonic_ns())
-                hand.poll()
-                tick += 1
-                if tick % SLOW_POLL_TICKS == 0:
-                    hand.poll_slow()
-                    hand.check_recovery()
-                if tick % (SLOW_POLL_TICKS * 60) == 0:
-                    hand.log_run_summary()   # 1분마다 run.csv 스냅샷
-                next_ns += period_ns
-                sleep_s = (next_ns - time.monotonic_ns()) / 1e9
-                if sleep_s > 0:
-                    stop.wait(sleep_s)   # 과주기면 자지 않고 바로 다음 루프 → 다음 tick이 지연을 집계
-
-        poller = threading.Thread(target=poll_loop, daemon=True)
-        poller.start()
+        poller = None   # 홈잉 중 Ctrl+C가 나도 finally가 참조할 수 있게 먼저 둠
+        # 홈잉(home)부터 try 안: 토크를 켜는 순간 이후 어디서 끊겨도 finally의 토크 off가 실행됨
         try:
+            if args.log:
+                import runlog
+                run_dir = runlog.new_run_dir(args.log)
+                hand.logger = runlog.CsvLogger(run_dir)
+                print(f"CSV 로깅: {run_dir}")
+            if args.no_home:
+                print("모든 관절 토크 꺼짐, 위치 모드. 대시보드에서 토크를 켜세요")
+            else:
+                print(f"전 관절 토크 켜고 0 rad(zero tick)로 이동 중 ({HOME_SPEED} rad/s)...")
+                far = hand.home()
+                if far:
+                    print(f"⚠ {HOME_TIMEOUT:.0f}초 안에 0 rad에 도착하지 못함 (토크는 켜진 채 목표 0 유지): "
+                          f"{', '.join(f'{n} {q:+.2f} rad' for n, q in far.items())}")
+                else:
+                    print("모든 관절 0 rad 도착, 토크 켜짐")
+
+            def poll_loop():
+                """고정 데드라인으로 POLL_PERIOD마다 돈다(드리프트 누적 없음). 매 주기 시작 시각을
+                LoopStats에 넣어 50 Hz 주기 편차(지터)와 누락 프레임을 집계한다(T-11)."""
+                period_ns = round(POLL_PERIOD * 1e9)
+                next_ns = time.monotonic_ns()
+                tick = 0
+                while not stop.is_set():
+                    hand.loop_stats.tick(time.monotonic_ns())
+                    hand.poll()
+                    tick += 1
+                    if tick % SLOW_POLL_TICKS == 0:
+                        hand.poll_slow()
+                        hand.check_recovery()
+                    if tick % (SLOW_POLL_TICKS * 60) == 0:
+                        hand.log_run_summary()   # 1분마다 run.csv 스냅샷
+                    next_ns += period_ns
+                    sleep_s = (next_ns - time.monotonic_ns()) / 1e9
+                    if sleep_s > 0:
+                        stop.wait(sleep_s)   # 과주기면 자지 않고 바로 다음 루프 → 다음 tick이 지연을 집계
+
+            poller = threading.Thread(target=poll_loop, daemon=True)
+            poller.start()
             uvicorn.run(create_app(hand, args.presets), host=args.host, port=args.http_port)
         finally:
             stop.set()
-            poller.join()   # 포트를 닫기 전에 폴링을 멈춤
+            if poller is not None:
+                poller.join()   # 포트를 닫기 전에 폴링을 멈춤
             hand.shutdown()
             if hand.logger:
                 hand.log_run_summary()
