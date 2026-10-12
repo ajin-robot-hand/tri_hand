@@ -13,12 +13,12 @@
 | :--- | :--- | :--- |
 | MuJoCo 모델 컴파일 | `mujoco.MjModel.from_xml_path("src/scene.xml")` | 성공, `nu=7 / nq=7 / nbody=8` (7 DOF 일치) |
 | 헤드리스 물리 검증 | `python src/run_sim.py --headless` | 8초 발산 없음, `max|qvel| ≤ 0.95 rad/s` |
-| 유닛 테스트 | `python -m pytest tests` | **104 passed** |
+| 유닛 테스트 | `python -m pytest tests` | **106 passed** |
 | 위치 제어 응답 | `B_j2` 0→1.0 rad 스텝 | 정착 1.0013 rad, **오버슈트 0.2%** (kp=12 / kv=0.5 적정) |
 | 정적 유지 오차 | 전 관절 `ctrl=0`, 중력 −Y | 오차 0.000 rad (링크 축과 중력이 평행해 모멘트 없음) |
 | 실물 설정 ↔ 시뮬 일치 | `tests/test_real.py::test_config_ranges_match_sim` | `config.json` range == `ctrlrange` 자동 검증 중 |
 
-> ⚠ 재현 시 주의: 테스트 실행에 `httpx`가 필요한데 `requirements.txt`에 없습니다 (아래 T-07).
+> 재현 시: 테스트 실행에 `httpx`가 필요합니다. `requirements-dev.txt`로 분리돼 있으니 `pip install -r requirements.txt -r requirements-dev.txt`로 같이 설치하세요 (T-07 완료).
 
 ---
 
@@ -108,6 +108,9 @@ README는 이를 [issue #7]로 이미 알고 있으나, `run_sim.py` 주석은 �
 - [x] **T-04** `docs/eval.md` 용어 정정 (D-06) — "권종별"→"그립 유형별", `GroupBulkRead`→`GroupSyncRead`, "전축"→"전 축" (commit `f094492`, KPI 수치는 변경하지 않음)
 - [x] **T-07** `requirements.txt`에 테스트 의존성 분리 추가 (D-07) — `httpx`, `pytest` (또는 `requirements-dev.txt`)
   - *완료 기준:* 새 venv에서 `pip install -r requirements.txt && pytest tests` → 104 passed — 충족, `requirements-dev.txt` 신설(`-r requirements.txt`가 아니라 별도 파일로 분리, README에 두 파일 함께 설치하도록 안내) (commit `9f6dd5f`)
+- [x] **T-16** pytest 통과 개수 표기 최신화 (§0 표·§4 구성안 "104 passed" → "106 passed") + httpx 재현 안내 갱신
+  - T-08~T-10 커밋(`6494eab`)이 테스트 2개를 추가하면서 §0 요약표·§4 구성안의 숫자와 "httpx가 requirements.txt에 없음" 경고(T-07 완료로 이미 해소)가 갱신되지 않고 남아 있던 것을 발견해 수정
+  - *완료 기준:* `~/mujoco_env/bin/python -m pytest tests` 재실행 결과(106 passed)와 문서 표기가 일치, T-07 완료 상태를 반영한 재현 안내로 교체 — 충족
 
 > **제외됨 (2026-10-12 판단):** 3종 그립 프리셋 정의와 파지 성공률 시험 절차서는 작업 목록에서 **뺍니다.**
 > - 프리셋은 **이미 실물에서 3종 모두 정의·동작 확인 완료**. 저장 위치인 `presets.json`은 `.gitignore` 대상(`.gitignore:21-22`)이라 리포지토리에 보이지 않을 뿐입니다.
@@ -144,7 +147,7 @@ README는 이를 [issue #7]로 이미 알고 있으나, `run_sim.py` 주석은 �
 README는 "어떻게 쓰는가"를 담고 있으니, **"계획서 약속을 어디까지 지켰는가"**는 별도 문서로 분리하는 편이 평가자에게 읽히기 좋습니다. 아래 골격을 제안합니다.
 
 1. **평가 지표 추적표** — 계획서 KPI 4개 × (목표 / 측정 정의 / 측정 명령 / 현재값 / 판정 / 근거 파일·커밋)
-2. **달성 근거** — 재현 명령과 그 출력 (XML 컴파일, `pytest 104 passed`, 헤드리스 발산 없음, 스텝 응답 0.2% 오버슈트)
+2. **달성 근거** — 재현 명령과 그 출력 (XML 컴파일, `pytest 106 passed`, 헤드리스 발산 없음, 스텝 응답 0.2% 오버슈트)
 3. **미달 항목과 사유** — 계측 레이어 부재를 숨기지 않고 T-11~T-15로 연결
 4. **리스크 등록부** — ① 완전 오므림 시 A↔B·C 자가 간섭과 `A_j1` 토크 포화 → 과열 위험(issue #7) ② 7왕복 쓰기로 인한 50 Hz 지터 ③ 실물 바깥쪽 가동한계 미측정(합 86° 는 시뮬 합의값일 뿐)
 5. **시뮬 ↔ 실물 대응표** — 같은 API를 쓰지만 **게인 단위가 다름**(시뮬 `kp` N·m/rad vs 실물 Position P Gain 레지스터). 평가자가 가장 오해하기 쉬운 지점이므로 명시
