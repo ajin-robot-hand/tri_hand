@@ -93,13 +93,19 @@ class DxlError(Exception):
 
 
 class Bus:
-    """U2D2 포트 하나. 읽기 실패는 DxlError로 올림."""
+    """U2D2 포트 하나. 읽기 실패는 DxlError로 올림.
+
+    tx_count/rx_error_count: 패킷 통계(계획서 KPI "패킷 에러율" 측정용). 프로세스 수명 동안의
+    인메모리 누적값이며 재시작하면 0으로 돌아감 — 영속 로그는 DB 레이어(T-12) 몫.
+    """
 
     def __init__(self, port: str, baudrate: int):
         import dynamixel_sdk as sdk   # 하드웨어 없이 단위 변환만 쓰는 곳(테스트)에서는 필요 없음
         self._sdk = sdk
         self.port = sdk.PortHandler(port)
         self.packet = sdk.PacketHandler(2.0)
+        self.tx_count = 0
+        self.rx_error_count = 0
         if not self.port.openPort():
             raise DxlError(f"포트를 열 수 없음: {port}")
         self.set_baudrate(baudrate)
@@ -131,20 +137,26 @@ class Bus:
     def read(self, dxl_id: int, name: str) -> int:
         reg = REG[name]
         fn = {1: self.packet.read1ByteTxRx, 2: self.packet.read2ByteTxRx, 4: self.packet.read4ByteTxRx}[reg.size]
+        self.tx_count += 1
         value, result, error = fn(self.port, dxl_id, reg.addr)
         if result != self._sdk.COMM_SUCCESS:
+            self.rx_error_count += 1
             raise DxlError(f"ID {dxl_id} {name} 읽기 실패: {self.packet.getTxRxResult(result)}")
         if error:
+            self.rx_error_count += 1
             raise DxlError(f"ID {dxl_id} {name} 오류 응답: {self.packet.getRxPacketError(error)}")
         return _signed(value, reg)
 
     def write(self, dxl_id: int, name: str, value: int):
         reg = REG[name]
         fn = {1: self.packet.write1ByteTxRx, 2: self.packet.write2ByteTxRx, 4: self.packet.write4ByteTxRx}[reg.size]
+        self.tx_count += 1
         result, error = fn(self.port, dxl_id, reg.addr, value & ((1 << 8 * reg.size) - 1))
         if result != self._sdk.COMM_SUCCESS:
+            self.rx_error_count += 1
             raise DxlError(f"ID {dxl_id} {name} 쓰기 실패: {self.packet.getTxRxResult(result)}")
         if error:
+            self.rx_error_count += 1
             raise DxlError(f"ID {dxl_id} {name} 오류 응답: {self.packet.getRxPacketError(error)}")
 
     def sync_read(self, ids: list[int], first: str, last: str) -> dict[int, dict[str, int]]:
@@ -154,12 +166,33 @@ class Bus:
         group = self._sdk.GroupSyncRead(self.port, self.packet, start, end - start)
         for i in ids:
             group.addParam(i)
+        self.tx_count += 1
         result = group.txRxPacket()
         if result != self._sdk.COMM_SUCCESS:
+            self.rx_error_count += 1
             raise DxlError(f"일괄 읽기 실패 ({first}~{last}): {self.packet.getTxRxResult(result)}")
         out = {}
         for i in ids:
             if not group.isAvailable(i, start, end - start):
+                self.rx_error_count += 1
                 raise DxlError(f"ID {i} 일괄 읽기 응답 없음 ({first}~{last})")
             out[i] = {n: _signed(group.getData(i, REG[n].addr, REG[n].size), REG[n]) for n in names}
         return out
+
+    def sync_write(self, name: str, values: dict[int, int]):
+        """같은 레지스터(name)에 여러 모터의 값을 한 패킷으로 동시에 씀. 응답 대기 없음(GroupSyncWrite).
+
+        values의 모든 모터가 같은 (addr, size) 블록에 쓰이는 게 전제 — 위치/속도 모드를 섞어
+        한 번에 부르지 않는 호출부(Hand.set_targets)가 이를 보장함.
+        """
+        reg = REG[name]
+        group = self._sdk.GroupSyncWrite(self.port, self.packet, reg.addr, reg.size)
+        for i, v in values.items():
+            data = v & ((1 << 8 * reg.size) - 1)
+            if not group.addParam(i, [data >> 8 * k & 0xFF for k in range(reg.size)]):
+                raise DxlError(f"ID {i} {name} 일괄 쓰기 addParam 실패")
+        self.tx_count += 1
+        result = group.txPacket()
+        if result != self._sdk.COMM_SUCCESS:
+            self.rx_error_count += 1
+            raise DxlError(f"{name} 일괄 쓰기 실패: {self.packet.getTxRxResult(result)}")

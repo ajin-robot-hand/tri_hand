@@ -215,7 +215,7 @@ function buildCards() {
       <div class="lbl"><span id="lo-${n}"></span><span id="gl-${n}"></span><span id="hi-${n}"></span></div>
       <div class="sl"><input type="range" id="sl-${n}" step="any"><div class="pr" id="pr-${n}"></div></div>
       <div class="in"><input type="number" id="goal-${n}" step="any"><span class="u" id="u-${n}"></span></div>
-      <div class="now"><span>각도<b id="cq-${n}">-</b></span><span>속도<b id="cqd-${n}">-</b></span><span id="cfw-${n}">토크<b id="cf-${n}">-</b></span></div>
+      <div class="now"><span>각도<b id="cq-${n}">-</b></span><span>속도<b id="cqd-${n}">-</b></span><span id="cfw-${n}">토크<b id="cf-${n}">-</b></span><span>온도<b id="ct-${n}">-</b></span></div>
     </div>`).join("");
   for (const n in joints) {
     const sl = $(`sl-${n}`), goal = $(`goal-${n}`);
@@ -266,6 +266,7 @@ function renderCards(s) {
     $(`cqd-${n}`).textContent = s.velocities[n].toFixed(3);
     $(`cf-${n}`).textContent = s.forces[n].toFixed(2);
     $(`cfw-${n}`).classList.toggle("lim", Math.abs(s.forces[n]) >= s.gains[n].torque_limit - 1e-3);
+    $(`ct-${n}`).textContent = s.temperatures ? `${s.temperatures[n]}°C` : "-";   // 시뮬 서버에는 없는 필드
   }
   modes = s.modes; last = s;
 }

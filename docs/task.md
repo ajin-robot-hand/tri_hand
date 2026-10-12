@@ -116,13 +116,15 @@ README는 이를 [issue #7]로 이미 알고 있으나, `run_sim.py` 주석은 �
 
 ### P1 — 내일까지 여력이 되면 (계측의 최소 뼈대)
 
-- [ ] **T-08** `real/dxl.py`에 **GroupSyncWrite** 추가 + `Hand.set_targets`가 이를 사용 (D-02)
-  - `Bus.sync_write(ids, name, {id: value})` 형태, 응답 대기 없음
-  - *완료 기준:* `FakeBus`에 `sync_write`를 더해 기존 104 테스트 통과 + "7관절 1패킷" 테스트 1개 추가
-- [ ] **T-09** 폴링 구간 정정 (D-03): 상태 폴링은 `present_load`~`present_position`(126~135, 10 B)로 좁히고, **온도/전압/hw_error는 1 Hz 별도 폴링**으로 분리. `/state`에 `temperatures`, `voltages` 추가
-  - *완료 기준:* 대시보드에서 관절별 온도가 보이고, 20 ms 폴링 1회당 전송량이 66 B → 10 B/모터
-- [ ] **T-10** **패킷 통계 카운터**: `Bus`에 `tx_count` / `rx_error_count`를 두고 `/state`(또는 `/stats`)로 노출 (D-02 KPI)
-  - *완료 기준:* 24h 시험 없이도 `에러/총 패킷` 비율이 API 한 번으로 읽힘
+- [x] **T-08** `real/dxl.py`에 **GroupSyncWrite** 추가 + `Hand.set_targets`가 이를 사용 (D-02)
+  - `Bus.sync_write(name, {id: value})` 형태, 응답 대기 없음. 호출 하나(`/joints`, `/velocities`, `/grasp`, 프리셋 적용)의 전 관절이 같은 레지스터(위치 또는 속도)인 것을 `_require`가 보장하므로 혼합 호출은 발생하지 않음
+  - *완료 기준:* `FakeBus`에 `sync_write` 추가 + 기존 테스트 통과 + "7관절 1패킷, 개별 `goal_position` 왕복 0건" 테스트(`test_targets_sent_as_single_sync_write`) 추가 — 충족
+- [x] **T-09** 폴링 구간 정정 (D-03): 상태 폴링은 `present_load`~`present_position`(126~135, 10 B)로 좁히고, **온도/전압/hw_error는 1 Hz 별도 폴링(`poll_slow`)**으로 분리. `/state`에 `temperatures`, `voltages` 추가
+  - *완료 기준:* 대시보드 카드에 관절별 온도 표시, 20 ms 폴링 1회당 전송량이 66 B → 10 B/모터 — 충족. 1 Hz 쪽은 `hardware_error_status`~`present_temperature`(77 B) 단일 구간을 그대로 읽음 — 1 Hz에서는 바이트 수보다 구현 단순성이 우선이라는 판단(의도적, 오버엔지니어링 아님)
+  - ⚠ `test_poll_errors`가 `poll()`/`poll_slow()` 분리에 맞게 재작성됨(기존 로직은 그대로, 호출만 나눔)
+- [x] **T-10** **패킷 통계 카운터**: `Bus`에 `tx_count` / `rx_error_count`를 두고 `/state`로 노출 (D-02 KPI)
+  - 별도 `/stats` 엔드포인트는 만들지 않음 — 대시보드가 이미 `/state`를 폴링하므로 거기에 `packets: {tx, rx_errors}`로 추가하는 편이 더 단순함
+  - *완료 기준:* 24h 시험 없이도 `에러/총 패킷` 비율이 API 한 번으로 읽힘(`test_packet_stats_exposed_in_state`) — 충족. ⚠ 프로세스 재시작 시 0으로 리셋되는 인메모리 값(영속화는 T-12 DB 몫, 지금 끌어오지 않음)
 
 ### P2 — Phase 4(2026.12) 검증 전까지
 

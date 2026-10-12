@@ -17,7 +17,10 @@
   - torque_limit(N·m)은 Goal PWM으로 근사: 1.4 N·m(12V 정지 토크) = PWM 885
   - forces는 Present Load(정격 대비 %)를 1.4 N·m에 곱한 근사값
   - contacts는 센서가 없어 null. /reset 없음
-  - state에 hw_errors(관절별 하드웨어 오류)와 comm_error(마지막 통신 오류, 없으면 null)가 추가됨
+  - state에 hw_errors(관절별 하드웨어 오류), temperatures(°C)/voltages(V, 1 Hz 갱신),
+    comm_error(마지막 통신 오류, 없으면 null), packets(tx/rx_errors 누적 카운터)가 추가됨
+  - 목표 전송(/joints, /velocities, /grasp, 프리셋 적용)은 GroupSyncWrite로 관절 전체를 한 패킷에 보냄.
+    상태 폴링은 20 ms(위치/속도/부하)와 1 Hz(온도/전압/하드웨어 오류)로 나눠서 읽음
   - 현재 각도가 관절 범위 밖이면 토크를 켤 수 없음 (409). POST /torque는 그 관절만 건너뛰고
     나머지를 켠 뒤 skipped(관절 → 현재 각도)로 알려 줌
 """
@@ -53,7 +56,8 @@ STALL_TORQUE = 1.4   # N·m, XL430-W250 12V 정지 토크 (hand.xml forcerange�
 PWM_MAX = 885        # Goal PWM 100%
 GAIN_MAX = 16383     # Position P/D Gain 레지스터 범위
 MODE_CODE = {"position": 3, "velocity": 1}   # Operating Mode 레지스터 값
-POLL_PERIOD = 0.02   # s, 상태 읽기 주기
+POLL_PERIOD = 0.02   # s, 상태(위치/속도/부하) 읽기 주기
+SLOW_POLL_TICKS = 50  # POLL_PERIOD 기준 50회 = 1 s, 온도/전압/하드웨어 오류 읽기 주기
 HOME_SPEED = 0.5     # rad/s, 시작할 때 0 rad로 옮기는 속도
 HOME_TIMEOUT = 10.0  # s
 HOME_TOLERANCE = 20  # tick (약 1.8°), 도착으로 보는 오차
@@ -91,11 +95,14 @@ class Hand:
         self.servos: dict[str, Servo] = {}
         self.reading = {n: {"q": 0.0, "qd": 0.0, "f": 0.0} for n in cfg.joints}
         self.errors: dict[str, list[str]] = {n: [] for n in cfg.joints}
+        self.temperatures: dict[str, float] = {n: 0.0 for n in cfg.joints}
+        self.voltages: dict[str, float] = {n: 0.0 for n in cfg.joints}
         self.comm_error: str | None = None
         with self.lock:
             for n, j in cfg.joints.items():
                 self._setup(n, j)
         self.poll()
+        self.poll_slow()
 
     def _setup(self, n: str, j: cfgmod.JointCfg):
         b = self.bus
@@ -119,11 +126,14 @@ class Hand:
         return (-v, v)
 
     def poll(self):
-        """현재 각도/속도/부하와 하드웨어 오류를 읽어 둠. 실패하면 이전 값을 유지하고 comm_error에 남김."""
+        """현재 각도/속도/부하를 읽어 둠(20 ms 주기, present_load~present_position 10 B/모터).
+
+        실패하면 이전 값을 유지하고 comm_error에 남김. 온도/전압/하드웨어 오류는 변화가 느려
+        poll_slow()가 1 Hz로 따로 읽음(D-03: 20 ms 핫루프에 불필요한 바이트를 올리지 않음).
+        """
         with self.lock:
             try:
-                # 한 번에 읽음: macOS FTDI 드라이버는 읽기마다 약 16 ms 지연이 있음
-                regs = self.bus.sync_read(self.ids, "hardware_error_status", "present_position")
+                regs = self.bus.sync_read(self.ids, "present_load", "present_position")
             except DxlError as e:
                 self.comm_error = str(e)
                 return
@@ -133,7 +143,25 @@ class Hand:
                 self.reading[n] = {"q": tick_to_rad(m["present_position"], j.zero, j.sign),
                                    "qd": j.sign * m["present_velocity"] * VEL_UNIT,
                                    "f": j.sign * m["present_load"] / 1000 * STALL_TORQUE}
+
+    def poll_slow(self):
+        """온도/전압/하드웨어 오류를 읽어 둠(1 Hz 주기). 실패해도 이전 값을 유지하고 comm_error에 남김.
+
+        hardware_error_status(70)~present_temperature(146) 구간을 한 번에 읽음 — 1 Hz에서는
+        바이트 수가 중요하지 않으므로 중간의 운동 레지스터까지 함께 읽히는 것은 허용(단순함 우선).
+        """
+        with self.lock:
+            try:
+                regs = self.bus.sync_read(self.ids, "hardware_error_status", "present_temperature")
+            except DxlError as e:
+                self.comm_error = str(e)
+                return
+            self.comm_error = None
+            for n, j in self.cfg.joints.items():
+                m = regs[j.id]
                 self.errors[n] = hw_errors(m["hardware_error_status"])
+                self.temperatures[n] = m["present_temperature"]
+                self.voltages[n] = m["present_input_voltage"] / 10
 
     def state(self) -> dict:
         with self.lock:
@@ -148,7 +176,10 @@ class Hand:
                 "torque": {n: s.torque for n, s in self.servos.items()},
                 "contacts": None,
                 "hw_errors": dict(self.errors),
+                "temperatures": dict(self.temperatures),
+                "voltages": dict(self.voltages),
                 "comm_error": self.comm_error,
+                "packets": {"tx": self.bus.tx_count, "rx_errors": self.bus.rx_error_count},
             }
 
     def _require(self, names, mode: ModeName):
@@ -174,16 +205,27 @@ class Hand:
             self._send_goal(n, 0.0)
 
     def set_targets(self, targets: dict[str, float], mode: ModeName) -> dict:
+        """여러 관절의 목표를 GroupSyncWrite 1패킷으로 동시에 보냄(D-02: 관절별 TxRx 왕복 제거).
+
+        한 호출의 모든 목표가 같은 모드(= 같은 레지스터: goal_position 또는 goal_velocity)이므로
+        단일 sync_write로 묶을 수 있음 — _require가 이를 보장.
+        """
+        reg_name = "goal_position" if mode == "position" else "goal_velocity"
         applied, clipped = {}, []
         with self.lock:
             self._require(targets, mode)
+            raw = {}
             for n, v in targets.items():
                 lo, hi = self.range(n, mode)
                 c = min(max(v, lo), hi)
                 if c != v:
                     clipped.append(n)
-                self._send_goal(n, c)
                 applied[n] = c
+                j = self.cfg.joints[n]
+                raw[j.id] = rad_to_tick(c, j.zero, j.sign) if mode == "position" else round(j.sign * c / VEL_UNIT)
+            self.bus.sync_write(reg_name, raw)
+            for n, c in applied.items():
+                self.servos[n].target = c
         return {"applied": applied, "clipped": clipped}
 
     def outside_range(self, names) -> dict[str, float]:
@@ -466,8 +508,12 @@ def main():
         stop = threading.Event()
 
         def poll_loop():
+            tick = 0
             while not stop.is_set():
                 hand.poll()
+                tick += 1
+                if tick % SLOW_POLL_TICKS == 0:
+                    hand.poll_slow()
                 stop.wait(POLL_PERIOD)
 
         poller = threading.Thread(target=poll_loop, daemon=True)

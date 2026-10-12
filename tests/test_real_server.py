@@ -33,18 +33,26 @@ class FakeBus:
         self.regs = {i: {"torque_enable": 1, "operating_mode": 16, "min_position_limit": 0,
                          "max_position_limit": 4095, "position_p_gain": 640, "position_d_gain": 0,
                          "goal_pwm": 885, "velocity_limit": 265, "present_position": 2048, "goal_position": 2048,
-                         "goal_velocity": 0, "profile_velocity": 0, "present_velocity": 0, "present_load": 0, "hardware_error_status": 0}
+                         "goal_velocity": 0, "profile_velocity": 0, "present_velocity": 0, "present_load": 0,
+                         "hardware_error_status": 0, "present_input_voltage": 111, "present_temperature": 25}
                      for i in ids}
         self.writes = []
+        self.sync_writes = []   # (name, {id: value}) — GroupSyncWrite 1건
+        self.tx_count = 0
+        self.rx_error_count = 0
         self.fail = False
 
     def read(self, i, name):
+        self.tx_count += 1
         if self.fail:
+            self.rx_error_count += 1
             raise DxlError(f"ID {i} {name} 읽기 실패")
         return self.regs[i][name]
 
     def write(self, i, name, value):
+        self.tx_count += 1
         if self.fail:
+            self.rx_error_count += 1
             raise DxlError(f"ID {i} {name} 쓰기 실패")
         r = self.regs[i]
         if name in ("operating_mode", "min_position_limit", "max_position_limit") and r["torque_enable"]:
@@ -57,9 +65,26 @@ class FakeBus:
             r["present_position"] = r["goal_position"]
 
     def sync_read(self, ids, first, last):
+        self.tx_count += 1
+        if self.fail:
+            self.rx_error_count += 1
+            raise DxlError(f"일괄 읽기 실패 ({first}~{last})")
         start, end = REG[first].addr, REG[last].addr + REG[last].size
         names = [n for n, r in REG.items() if start <= r.addr and r.addr + r.size <= end]
-        return {i: {n: self.read(i, n) for n in names} for i in ids}
+        return {i: {n: self.regs[i][n] for n in names} for i in ids}
+
+    def sync_write(self, name, values):
+        """GroupSyncWrite 흉내: 응답 없는 패킷 1건으로 여러 id에 같은 레지스터를 씀."""
+        self.tx_count += 1
+        if self.fail:
+            self.rx_error_count += 1
+            raise DxlError(f"{name} 일괄 쓰기 실패")
+        self.sync_writes.append((name, dict(values)))
+        for i, v in values.items():
+            r = self.regs[i]
+            r[name] = v
+            if name == "goal_position" and r["torque_enable"] and r["operating_mode"] == 3:
+                r["present_position"] = v   # 실물처럼 위치 모드 + 토크 켜짐이면 즉시 추종
 
 
 @pytest.fixture
@@ -175,16 +200,52 @@ def test_preset_apply_writes_gains_and_pwm(bus, client):
 
 
 def test_poll_errors(bus):
+    """poll()은 20 ms 핫루프(부하/속도/위치)만, poll_slow()는 1 Hz(온도/전압/하드웨어 오류)만 갱신."""
     hand = server.Hand(bus, CFG)
-    bus.regs[ID("A_j0")]["hardware_error_status"] = 0b100000
     bus.regs[ID("A_j0")]["present_load"] = -500
     hand.poll()
+    assert hand.state()["forces"]["A_j0"] == pytest.approx(-0.7)
+
+    bus.regs[ID("A_j0")]["hardware_error_status"] = 0b100000
+    bus.regs[ID("A_j0")]["present_temperature"] = 58
+    bus.regs[ID("A_j0")]["present_input_voltage"] = 115
+    hand.poll_slow()
     s = hand.state()
-    assert s["hw_errors"]["A_j0"] == ["과부하"] and s["forces"]["A_j0"] == pytest.approx(-0.7)
+    assert s["hw_errors"]["A_j0"] == ["과부하"]
+    assert s["temperatures"]["A_j0"] == 58 and s["voltages"]["A_j0"] == pytest.approx(11.5)
+
     bus.fail = True
     hand.poll()
+    hand.poll_slow()
     s = hand.state()
     assert s["comm_error"] and s["hw_errors"]["A_j0"] == ["과부하"]   # 이전 값 유지
+
+
+def test_targets_sent_as_single_sync_write(bus, client):
+    """GroupSyncWrite로 7관절을 1패킷에 보냄 — 관절별 개별 goal_position 쓰기(TxRx 왕복)는 없어야 함."""
+    client.post("/torque", json={"enabled": True})
+    bus.writes.clear()
+    bus.sync_writes.clear()
+    r = client.post("/joints", json={n: 0.1 for n in CFG.joints}).json()
+    assert len(bus.sync_writes) == 1
+    name, values = bus.sync_writes[0]
+    assert name == "goal_position" and set(values) == {j.id for j in CFG.joints.values()}
+    assert not any(w[1] == "goal_position" for w in bus.writes)   # 개별 왕복 경로를 안 탐
+    assert all(v == pytest.approx(0.1, abs=2e-3) for v in r["applied"].values())
+
+
+def test_packet_stats_exposed_in_state(bus, client):
+    client.post("/torque", json={"enabled": True})
+    before = client.get("/state").json()["packets"]
+    client.post("/joints", json={"A_j1": 0.1})
+    after = client.get("/state").json()["packets"]
+    assert after["tx"] > before["tx"] and after["rx_errors"] == 0
+
+    bus.fail = True
+    r = client.post("/joints", json={"A_j1": 0.2})
+    assert r.status_code == 502
+    bus.fail = False
+    assert client.get("/state").json()["packets"]["rx_errors"] >= 1
 
 
 def test_comm_failure_returns_502(bus, client):
