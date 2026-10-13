@@ -1,6 +1,6 @@
 """server.py 프리셋/대시보드 API 테스트.
 
-  .venv/bin/python -m pytest tests
+  ~/mujoco_env/bin/python -m pytest tests
 """
 import copy
 import json

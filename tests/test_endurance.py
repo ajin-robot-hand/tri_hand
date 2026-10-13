@@ -1,4 +1,4 @@
-"""real/endurance.py (24h 러너, T-14) 테스트. HTTP 없이 순수 함수와 run() 루프를 검증.
+"""real/endurance.py (연속 구동 러너, T-14) 테스트. HTTP 없이 순수 함수와 run() 루프를 검증.
 
   ~/mujoco_env/bin/python -m pytest tests/test_endurance.py
 """
@@ -83,6 +83,47 @@ def test_run_falls_back_to_grasp_without_presets():
     endurance.run(c, hours=1.0, poll=0.0, max_temp=65)
     assert 1.0 in c.grasps   # 프리셋이 없으면 /grasp amount=1로 파지
 
+
+
+class TimedClient(FakeClient):
+    """state()를 부를 때마다 가짜 시계를 step초씩 진행시키는 서버. 실제로 기다리지 않고 사이클을 돈다."""
+
+    def __init__(self, grips, clock, step):
+        super().__init__(grips, hot_after=10**9)
+        self._clock, self._step = clock, step
+
+    def state(self):
+        self._clock[0] += self._step
+        return super().state()
+
+
+def test_run_cycles_default_and_selected_grip(monkeypatch):
+    # default↔상자 2분 = 30 s 쥐기 + 90 s 펴기 한 사이클. default는 파지 순환에서 빠지고 오픈에 쓰인다
+    clock = [0.0]
+    monkeypatch.setattr(endurance.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(endurance.time, "sleep", lambda s: None)
+    c = TimedClient(["default", "상자", "물병"], clock, step=10.0)
+    summary = endurance.run(c, hours=2 / 60, poll=0.0, max_temp=65, grips=["상자"])
+    assert "[완료]" in summary and "2.0 min" in summary
+    assert c.applied == ["상자", "default", "default"]   # 쥐기 → 펴기 → 종료 시 홈
+    assert c.grasps == []                                 # default가 있으면 /grasp 안 씀
+
+
+def test_run_excludes_default_from_grip_rotation():
+    c = FakeClient(["default", "상자"], hot_after=1)
+    endurance.run(c, hours=1.0, poll=0.0, max_temp=65)
+    assert c.applied[0] == "상자" and c.applied[-1] == "default"
+
+
+def test_run_rejects_unknown_grip_before_torque_on():
+    c = FakeClient(["default", "상자"], hot_after=1)
+    try:
+        endurance.run(c, hours=1.0, poll=0.0, max_temp=65, grips=["컵"])
+    except ValueError as e:
+        assert "컵" in str(e)
+    else:
+        raise AssertionError("ValueError expected")
+    assert c.torque == []
 
 class FlakyClient(FakeClient):
     """state()/apply_preset()가 지정한 호출 번호에서 통신 오류를 내는 가짜 서버."""

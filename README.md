@@ -66,7 +66,30 @@ graph TD
 
 ---
 
+## 🛠 환경 세팅 (Setup)
+
+권장 파이썬 버전은 **Python 3.10**입니다. 특히 노트북 **내장 웹캠 원격 조종(`src/teleop.py`)과 U2D2(USB) 실물 제어를 동시 구동하려면 WSL2가 아닌 Windows 컴퓨터 자체(네이티브 환경)**에서 실행해야 합니다. (Linux 및 macOS 환경도 검증 완료되어 정상 지원합니다.)
+
+```bash
+# [Windows]
+# 가상환경 활성화 (최초 1회 생성: python -m venv ..\mujoco_env && pip install -r requirements.txt)
+..\mujoco_env\Scripts\Activate.ps1       # PowerShell (상위 mujoco_env)
+# source ../mujoco_env/Scripts/activate  # Git Bash
+# ..\mujoco_env\Scripts\activate.bat     # CMD
+
+# [Linux / macOS]
+source ~/mujoco_env/bin/activate
+# (신규 생성 시: python3.10 -m venv ~/mujoco_env && pip install -r requirements.txt)
+```
+
+> 📖 **운영체제별 상세 가이드**:  
+> Windows PowerShell 실행 권한(`Set-ExecutionPolicy`), Git Bash/CMD 안내, 내장 웹캠/U2D2 COM 포트 점검, macOS(`mjpython`) 및 환경 검증 스크립트는 [**docs/environment_setup.md**](docs/environment_setup.md)를 참고하세요.
+
+---
+
 ## 🚀 빠른 시작 (Quick Start)
+
+> 💡 **안내**: 가상환경을 활성화(`..\mujoco_env\Scripts\Activate.ps1` 또는 `source ../mujoco_env/Scripts/activate`)한 상태에서 명령어를 실행하세요.
 
 가상 시뮬레이션과 실물 로봇 중 원하는 환경을 선택하여 바로 실행할 수 있습니다.
 
@@ -81,16 +104,16 @@ python src/server.py --headless
 ```
 
 > **3D 뷰어(GUI)로 직접 확인하고 싶은 경우**:
+> - **Windows / Linux**: `python src/run_sim.py`
 > - **macOS**: `mjpython src/run_sim.py`
-> - **Linux GUI**: `python src/run_sim.py`
-> - **WSL2 / 서버**: 디스플레이 드라이버 이슈 방지를 위해 `--headless` 권장 (`python src/run_sim.py --headless`)
+> - **헤드리스 모드 (뷰어 창 없이 서버만)**: `python src/server.py --headless`
 
 ### Mode B: 실물 로봇 손 제어 (Real Robot)
 
-U2D2를 PC에 연결하고 모터 12V 전원을 인가한 후 실행합니다.
+U2D2를 PC에 연결하고 모터 12V 전원을 인가한 후 실행합니다. (Windows에서는 COM 포트를 자동 탐색합니다.)
 
 ```bash
-# 1) 실물 연결 및 모터 상태 점검
+# 1) 실물 연결 및 모터 상태 점검 (COM 포트 자동 인식 또는 --port COM3)
 python real/check.py
 
 # 2) 실물 제어 서버 실행 (안전 Homing 후 대시보드 오픈)
@@ -119,11 +142,12 @@ python src/server.py          # 시뮬레이션 (macOS 뷰어: mjpython src/serv
 python real/server.py         # 실물
 
 # 2) 다른 터미널에서 카메라 조종 실행
-python src/teleop.py                 # 기본 웹캠(0번)
+python src/teleop.py                 # 기본 내장 웹캠(0번)
 python src/teleop.py --source 1      # 다른 카메라
 python src/teleop.py --source a.mp4  # 동영상 파일
 ```
 
+- **내장 카메라 지원**: Windows 노트북/PC의 기본 웹캠(0번)으로 즉시 사람 손을 추적합니다. (WSL2와 달리 별도 USB 패스스루 없이 안정적으로 구동됩니다.)
 - 처음 실행할 때 MediaPipe 손 인식 모델(`src/models/hand_landmarker.task`)을 자동으로 내려받습니다.
 - macOS에서는 처음 실행할 때 터미널 앱의 카메라 권한을 허용해야 합니다.
 - 미리보기 창에 인식한 손 관절점, 관절별 목표 각도, 엄지 벌림 각도(`thumb spread`)가 표시됩니다. `q`를 누르면 종료합니다.
@@ -164,7 +188,7 @@ python src/teleop.py --source a.mp4  # 동영상 파일
 - 손이 화면에서 사라지면 목표를 보내지 않으므로 로봇은 마지막 자세를 유지합니다.
 - 엄지를 손바닥 면에서 약 60° 넘게 들어 올리면 좌우 방향을 믿을 수 없어 `A_j0`는 마지막 값을 유지합니다.
 - 서버가 목표를 거절하면(예: 토크가 꺼진 관절, 409) 미리보기 창에 이유가 표시됩니다.
-- 세 손가락을 80% 이상 오므리면(엄지를 크게 벌리면 50%부터) 시뮬레이션에서 A 손가락 끝이 B·C 끝에 닿습니다 ([#7](https://github.com/ajin-robot-hand/tri_hand_mujoco/issues/7)). 실물에서는 처음에 천천히 주먹을 쥐어 확인하세요.
+- 세 손가락을 80% 이상 오므리면(엄지를 크게 벌리면 50%부터) 시뮬레이션에서 A 손가락 끝이 B·C 끝에 닿습니다 ([#7](https://github.com/ajin-robot-hand/tri_hand/issues/7)). 실물에서는 처음에 천천히 주먹을 쥐어 확인하세요.
 
 ### 내 손에 맞추기
 
@@ -175,42 +199,6 @@ python src/teleop.py --source a.mp4  # 동영상 파일
 | `HUMAN_RANGE` | 손가락별 사람 굽힘 각도 범위 [펼침, 최대 굽힘] (rad) | 끝까지 안 펴지면 첫째 값↑, 끝까지 안 오므려지면 둘째 값↓ |
 | `THUMB_RANGE` | 엄지 벌림 각도 [검지에 붙임, 최대로 벌림] (rad) | 미리보기의 `thumb spread` 값을 두 자세에서 읽어 입력 |
 | `THUMB_SIGN` | 엄지를 벌릴 때 `A_j0` 회전 방향 | 반대로 돌면 `-1.0` |
-
----
-
-## 🛠 환경 세팅 (Setup)
-
-권장 파이썬 버전은 **Python 3.10**이며, 빠르고 격리된 환경 구축을 위해 [`uv`](https://github.com/astral-sh/uv) 사용을 권장합니다.
-
-```bash
-# 1) uv 설치 (설치되어 있지 않은 경우)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-source ~/.local/bin/env
-
-# 2) Python 3.10 가상환경 생성 및 활성화
-uv python install 3.10
-uv venv ~/mujoco_env --python 3.10
-source ~/mujoco_env/bin/activate
-
-# 3) 의존성 패키지 설치
-uv pip install -r requirements.txt
-```
-
-<details>
-<summary><b>기타 OS별 참고 사항</b></summary>
-
-* **Linux (Ubuntu/Debian) `apt` 사용 시**:
-  ```bash
-  sudo apt update && sudo apt install -y python3.10 python3.10-venv
-  python3.10 -m venv ~/mujoco_env
-  source ~/mujoco_env/bin/activate
-  pip install -r requirements.txt
-  ```
-* **macOS (Homebrew)**:
-  `brew install python@3.10` 후 동일하게 가상환경을 생성합니다. MuJoCo GUI 창을 띄울 때는 macOS의 스레드 특성상 `mjpython`을 사용해야 합니다.
-* **Windows (WSL2)**:
-  Windows 호스트가 아닌 **WSL2(Ubuntu)** 내부에서 위 `uv` 가이드대로 설치합니다. 실물 U2D2 연결 시 `usbipd`를 통해 USB 포트를 WSL2에 바인딩해야 `/dev/ttyUSB*`로 인식됩니다.
-</details>
 
 ---
 
@@ -306,7 +294,7 @@ python real/endurance.py --hours 24
 
 ```
 tri_hand/
-├── docs/               # 개발 계획서(eval.md) · 평가 지표 추적(evaluation.md) · 잔여 작업 점검표(task.md) · 설계 스펙(superpowers/) · 데모 미디어
+├── docs/               # 환경 설정(environment_setup.md) · 개발 계획서(eval.md) · 평가 지표 추적(evaluation.md) · 잔여 작업 점검표(task.md) · 데모 미디어
 ├── src/                # [가상 시뮬레이션] 모델 및 제어 환경
 │   ├── scene.xml       # 전체 시뮬레이션 씬 (바닥, 조명 등)
 │   ├── hand.xml        # 로봇 손 기구학/동역학 MuJoCo 모델
