@@ -17,9 +17,6 @@ Thumbs.db
 .vscode/
 .idea/
 
-# tri_hand 대시보드 프리셋 (사용자 데이터)
-src/presets.json
-real/presets.json
 
 # CSV 로깅 출력 (T-12, --log DIR)
 logs/

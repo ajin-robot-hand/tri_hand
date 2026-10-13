@@ -1,0 +1,178 @@
+{
+  "default": {
+    "A_j0": {
+      "target": 0.0,
+      "kp": 640,
+      "kv": 3600,
+      "torque_limit": 1.4
+    },
+    "A_j1": {
+      "target": 0.0,
+      "kp": 640,
+      "kv": 3600,
+      "torque_limit": 1.4
+    },
+    "A_j2": {
+      "target": 0.0,
+      "kp": 640,
+      "kv": 3600,
+      "torque_limit": 1.4
+    },
+    "B_j1": {
+      "target": 0.0,
+      "kp": 640,
+      "kv": 3600,
+      "torque_limit": 1.4
+    },
+    "B_j2": {
+      "target": 0.0,
+      "kp": 640,
+      "kv": 3600,
+      "torque_limit": 1.4
+    },
+    "C_j1": {
+      "target": 0.0,
+      "kp": 640,
+      "kv": 3600,
+      "torque_limit": 1.4
+    },
+    "C_j2": {
+      "target": 0.0,
+      "kp": 640,
+      "kv": 3600,
+      "torque_limit": 1.4
+    }
+  },
+  "상자": {
+    "A_j0": {
+      "target": -0.002,
+      "kp": 640,
+      "kv": 3600,
+      "torque_limit": 1.4
+    },
+    "A_j1": {
+      "target": -0.236,
+      "kp": 640,
+      "kv": 3600,
+      "torque_limit": 1.4
+    },
+    "A_j2": {
+      "target": -1.277,
+      "kp": 640,
+      "kv": 3600,
+      "torque_limit": 1.4
+    },
+    "B_j1": {
+      "target": -0.196,
+      "kp": 640,
+      "kv": 3600,
+      "torque_limit": 1.4
+    },
+    "B_j2": {
+      "target": 1.209,
+      "kp": 640,
+      "kv": 3600,
+      "torque_limit": 1.4
+    },
+    "C_j1": {
+      "target": -0.206,
+      "kp": 640,
+      "kv": 3600,
+      "torque_limit": 1.4
+    },
+    "C_j2": {
+      "target": 1.184,
+      "kp": 640,
+      "kv": 3600,
+      "torque_limit": 1.4
+    }
+  },
+  "물병": {
+    "A_j0": {
+      "target": 0.031,
+      "kp": 640,
+      "kv": 3600,
+      "torque_limit": 1.4
+    },
+    "A_j1": {
+      "target": -0.187,
+      "kp": 640,
+      "kv": 3600,
+      "torque_limit": 1.4
+    },
+    "A_j2": {
+      "target": -1.485,
+      "kp": 640,
+      "kv": 3600,
+      "torque_limit": 1.4
+    },
+    "B_j1": {
+      "target": 0.086,
+      "kp": 640,
+      "kv": 3600,
+      "torque_limit": 1.4
+    },
+    "B_j2": {
+      "target": 1.448,
+      "kp": 640,
+      "kv": 3600,
+      "torque_limit": 1.4
+    },
+    "C_j1": {
+      "target": 0.106,
+      "kp": 640,
+      "kv": 3600,
+      "torque_limit": 1.4
+    },
+    "C_j2": {
+      "target": 1.46,
+      "kp": 640,
+      "kv": 3600,
+      "torque_limit": 1.4
+    }
+  },
+  "휴지심": {
+    "A_j0": {
+      "target": 0.028,
+      "kp": 640,
+      "kv": 3600,
+      "torque_limit": 1.4
+    },
+    "A_j1": {
+      "target": -0.199,
+      "kp": 640,
+      "kv": 3600,
+      "torque_limit": 1.4
+    },
+    "A_j2": {
+      "target": -1.48,
+      "kp": 640,
+      "kv": 3600,
+      "torque_limit": 1.4
+    },
+    "B_j1": {
+      "target": 0.138,
+      "kp": 640,
+      "kv": 3600,
+      "torque_limit": 1.4
+    },
+    "B_j2": {
+      "target": 1.404,
+      "kp": 640,
+      "kv": 3600,
+      "torque_limit": 1.4
+    },
+    "C_j1": {
+      "target": 0.163,
+      "kp": 640,
+      "kv": 3600,
+      "torque_limit": 1.4
+    },
+    "C_j2": {
+      "target": 1.445,
+      "kp": 640,
+      "kv": 3600,
+      "torque_limit": 1.4
+    }
+  }
+}

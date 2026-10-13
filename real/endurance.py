@@ -1,6 +1,7 @@
-"""24h 연속 구동 러너 (T-14). 실행 중인 real/server.py에 HTTP로 명령해 그립을 순환시킨다.
+"""연속 구동 러너 (T-14). 실행 중인 real/server.py에 HTTP로 명령해 그립을 순환시킨다.
 
-계획서 [Page 5] 듀티: 정적 파지 30 s + 오픈 90 s. 5분마다 사용 가능한 프리셋(3종 그립)을 순환.
+계획서 [Page 5] 듀티: 정적 파지 30 s + 오픈 90 s. 오픈은 "default" 프리셋(홈 자세)으로 돌아가고,
+파지는 --grips로 고른 프리셋(기본: "default"를 뺀 전부)을 5분마다 바꿔 가며 쓴다.
 Present Temperature가 상한(기본 65 °C)을 넘으면 즉시 오픈·토크 off 후 중단한다.
 서버와의 통신이 일시적으로 실패하면 경고만 찍고 다음 주기에 재시도하며, 실패가
 --max-outage초(기본 60 s) 넘게 이어질 때만 중단한다.
@@ -10,13 +11,15 @@ Present Temperature가 상한(기본 65 °C)을 넘으면 즉시 오픈·토크 
 
 사용법
   python real/server.py --log logs &
-  python real/endurance.py --hours 24
+  python real/endurance.py --grips 상자 --minutes 2   # default↔상자 한 사이클(30 s 쥐기 + 90 s 펴기)
+  python real/endurance.py --hours 24                 # 3종 그립 순환
 """
 import argparse
 import json
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 STATIC = 30.0    # s, 정적 파지 유지
@@ -24,6 +27,7 @@ OPEN = 90.0      # s, 오픈 유지
 ROTATE = 300.0   # s, 그립을 바꾸는 주기(5분)
 MAX_TEMP = 65.0  # °C, 계획서 상한
 MAX_OUTAGE = 60.0  # s, 통신 실패가 이만큼 연속되면 중단
+HOME = "default"   # 오픈 때 적용하는 프리셋. 없으면 /grasp amount=0
 COMM_ERRORS = (OSError, ValueError)   # URLError·타임아웃·연결 끊김(OSError 계열), 깨진 JSON 응답
 
 
@@ -62,16 +66,26 @@ class Client:
         return self._req("POST", "/torque", {"enabled": enabled})
 
     def apply_preset(self, name: str):
-        return self._req("POST", f"/presets/{name}/apply")
+        return self._req("POST", f"/presets/{urllib.parse.quote(name, safe='')}/apply")
 
     def grasp(self, amount: float):
         return self._req("POST", "/grasp", {"amount": amount})
 
 
 def run(c: Client, hours: float, poll: float, max_temp: float,
-        static=STATIC, open_s=OPEN, rotate=ROTATE, max_outage=MAX_OUTAGE) -> str:
-    grips = list(c.presets())
-    print(f"그립 {len(grips)}종 순환: {grips or '(프리셋 없음 → /grasp 사용)'}")
+        static=STATIC, open_s=OPEN, rotate=ROTATE, max_outage=MAX_OUTAGE, grips=None) -> str:
+    available = c.presets()
+    missing = [g for g in grips or [] if g not in available]
+    if missing:
+        raise ValueError(f"없는 프리셋: {missing} (있는 것: {list(available)})")
+    grips = list(grips) if grips else [k for k in available if k != HOME]
+    home = HOME if HOME in available else None
+
+    def open_hand():
+        c.apply_preset(home) if home else c.grasp(0.0)
+
+    print(f"그립 {len(grips)}종 순환: {grips or '(프리셋 없음 → /grasp 사용)'}, "
+          f"오픈: {home or '/grasp amount=0'}")
     c.set_torque(True)
     deadline = time.monotonic() + hours * 3600
     start = time.monotonic()
@@ -90,7 +104,7 @@ def run(c: Client, hours: float, poll: float, max_temp: float,
                     if mode == "grasp":
                         c.apply_preset(grips[grip]) if grips else c.grasp(1.0)
                     else:
-                        c.grasp(0.0)
+                        open_hand()
                     last = key
                 st = c.state()
             except COMM_ERRORS as e:
@@ -114,22 +128,23 @@ def run(c: Client, hours: float, poll: float, max_temp: float,
         reason = "사용자 중단"
     finally:
         try:
-            c.grasp(0.0)
+            open_hand()
             c.set_torque(False)
         except COMM_ERRORS:
             pass
-    hours_run = (time.monotonic() - start) / 3600
+    run_s = time.monotonic() - start
+    hours_run = run_s / 3600
     try:
         st = c.state()
     except COMM_ERRORS as e:
-        return (f"[{reason}] 구동 {hours_run:.2f} h, 통신 실패 {comm_failures}회\n"
+        return (f"[{reason}] 구동 {hours_run:.2f} h ({run_s / 60:.1f} min), 통신 실패 {comm_failures}회\n"
                 f"  최고 온도   : {max_seen:.0f} °C (상한 {max_temp:.0f})\n"
                 f"  서버 응답 없음({e}): 나머지 지표는 서버 --log의 run.csv를 보세요")
     av = st.get("availability"), st.get("downtime_s"), st.get("reboots")
     loop = st.get("loop", {})
     pk = st.get("packets", {})
     rate = pk.get("rx_errors", 0) / pk["tx"] if pk.get("tx") else 0.0
-    return (f"[{reason}] 구동 {hours_run:.2f} h, 통신 실패 {comm_failures}회\n"
+    return (f"[{reason}] 구동 {hours_run:.2f} h ({run_s / 60:.1f} min), 통신 실패 {comm_failures}회\n"
             f"  최고 온도   : {max_seen:.0f} °C (상한 {max_temp:.0f})\n"
             f"  패킷 에러율 : {rate:.6f} (tx={pk.get('tx')}, rx_err={pk.get('rx_errors')})\n"
             f"  지터 p95    : {loop.get('jitter_ms_p95', 0):.3f} ms, 누락 {loop.get('dropped_frac', 0):.6f}\n"
@@ -140,7 +155,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--http-port", type=int, default=8000)
-    ap.add_argument("--hours", type=float, default=24.0)
+    dur = ap.add_mutually_exclusive_group()
+    dur.add_argument("--hours", type=float, default=24.0)
+    dur.add_argument("--minutes", type=float, help="구동 시간(분). 주면 --hours 대신 사용")
+    ap.add_argument("--grips", nargs="+", metavar="PRESET",
+                    help=f"파지에 쓸 프리셋 (기본: {HOME!r}를 뺀 전부, 5분마다 순환)")
     ap.add_argument("--poll", type=float, default=2.0, help="상태 확인 주기(s)")
     ap.add_argument("--max-temp", type=float, default=MAX_TEMP)
     ap.add_argument("--max-outage", type=float, default=MAX_OUTAGE, help="통신 실패가 이 시간(s) 넘게 이어지면 중단")
@@ -150,7 +169,11 @@ def main():
         c.state()
     except urllib.error.URLError as e:
         sys.exit(f"서버에 연결할 수 없음 ({c.base}): {e}. 먼저 real/server.py를 실행하세요")
-    print(run(c, args.hours, args.poll, args.max_temp, max_outage=args.max_outage))
+    hours = args.minutes / 60 if args.minutes is not None else args.hours
+    try:
+        print(run(c, hours, args.poll, args.max_temp, max_outage=args.max_outage, grips=args.grips))
+    except ValueError as e:
+        sys.exit(str(e))
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@
 """
 import glob
 import math
+import sys
 from typing import NamedTuple
 
 XL430_W250_MODEL = 1060
@@ -66,7 +67,16 @@ def hw_errors(status: int) -> list[str]:
 
 
 def find_ports() -> list[str]:
-    return sorted(p for pat in PORT_PATTERNS for p in glob.glob(pat))
+    ports = [p for pat in PORT_PATTERNS for p in glob.glob(pat)]
+    if sys.platform == "win32":
+        try:
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DEVICEMAP\SERIALCOMM")
+            for i in range(winreg.QueryInfoKey(key)[1]):
+                ports.append(winreg.EnumValue(key, i)[1])
+        except (OSError, FileNotFoundError):
+            pass
+    return sorted(ports)
 
 
 def pick_port(*candidates: str | None) -> str:
@@ -76,7 +86,8 @@ def pick_port(*candidates: str | None) -> str:
             return c
     ports = find_ports()
     if not ports:
-        raise DxlError("U2D2 포트를 찾지 못함: USB 연결 확인 (WSL2는 usbipd로 연결 필요)")
+        hint = "Windows 장치 관리자 '포트 (COM & LPT)' 확인" if sys.platform == "win32" else "USB 연결 확인"
+        raise DxlError(f"U2D2 포트를 찾지 못함: {hint} (--port로 지정 가능)")
     if len(ports) > 1:
         print(f"  포트가 여럿 있어 첫 번째를 사용: {ports}  (--port로 지정 가능)")
     return ports[0]
