@@ -248,3 +248,24 @@ tail -n 20 logs/*/error_event.csv
 - [ ] 시작·종료 시각, 대략의 실내 온도, 중간에 있었던 일 메모
 
 이 자료로 [`docs/evaluation.md`](evaluation.md)의 KPI 표와 issue #7 답변을 채웁니다.
+
+---
+
+## 7. (별도) 시연용 teleop.py 웹캠 점검 — Windows PC
+
+시연은 Windows 컴퓨터에서 하는데, 지금까지는 WSL2 환경에서 [`src/teleop.py`](../src/teleop.py)를 돌리다가 `cap.read()`에서 멈춰 Ctrl+C로 끊어야 했던 적이 있습니다. 원인이 GUI(Qt) 쪽인지 웹캠 프레임 전달 자체가 막히는 것인지 아직 특정 못 했으므로, 실제 시연 PC에서 미리 확인이 필요합니다.
+
+**증상 요약**
+- TFLite/MediaPipe 경고(`feedback manager`, `NORM_RECT` 등)와 `QFontDatabase: Cannot find font directory ...cv2/qt/fonts` 경고는 무해한 로그 노이즈 → 무시 가능
+- 몇 프레임 처리 후 `cap.read()`가 응답 없이 멈춤 → Ctrl+C로만 종료됨 (WSL2에서 웹캠을 usbipd로 패스스루할 때 자주 생기는 현상)
+
+**확인할 것**
+- [ ] 시연 PC(Windows)에서 WSL2 없이 **Windows 네이티브 파이썬**으로 `teleop.py`를 돌릴 수 있는지 먼저 검토 (웹캠 접근이 훨씬 안정적)
+  - 이 경우 `--url`을 WSL2 쪽 서버 IP(`http://<WSL2 IP>:8000`)로 지정해야 함
+- [ ] 굳이 WSL2에서 돌려야 한다면: `usbipd attach --wsl --busid <번호>`로 웹캠을 붙인 뒤 `/dev/video0` 등이 보이는지 확인
+- [ ] `~/mujoco_env/bin/python src/teleop.py --no-preview`로 먼저 돌려서, GUI(`cv2.imshow`) 없이도 똑같이 멈추는지 확인 → 멈추면 웹캠/드라이버 쪽 문제, 안 멈추면 GUI 쪽 문제로 범위를 좁힘
+- [ ] 몇 분 이상 끊김 없이 프레임을 받는지 (짧게 돌다 멈추는 패턴이 재현되는지)
+
+**재현되면 그때 고칠 것**
+- [ ] `run()`의 while 루프를 `try/finally`로 감싸서 Ctrl+C로 끊겨도 `cap.release()`가 항상 불리게 수정
+- [ ] 필요하면 `cap.read()`에 타임아웃/워치독을 둬서 무한 대기 대신 에러 메시지를 내고 종료하게 수정
