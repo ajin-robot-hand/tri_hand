@@ -79,3 +79,14 @@
 3. **액추에이터 파라미터 점검 (Control Gains)**:
    - 목표 각도에 도달하지 못하면 `kp`가 부족하거나, `forcerange`(1.4 N·m) 한계에 걸린 것은 아닌가?
    - 손가락이 떨리거나 진동(chattering)하면 `kv`를 늘리거나 관절 `damping`을 조정.
+
+---
+
+## 6. Git & PR 워크플로우 규칙 (Automation Protocol)
+
+사용자가 **"PR 올려줘"**, **"작업 내용 푸시해줘"** 등 작업 완료 및 제출을 요청하면, 추가 질문 없이 아래 3단계 작업을 **한 번에 연속 실행**합니다:
+
+1. **영문 브랜치 생성**: 변경 내용을 대표하는 영문 `kebab-case` 브랜치 자동 생성 (`git checkout -b <type>/<short-desc>`)
+2. **한국어 커밋 & 푸시**: Conventional Commits 규칙을 준수한 한국어 메시지로 커밋 후 푸시 (`<type>(<scope>): <한국어 요약>` -> `git push -u origin <branch>`)
+3. **GitHub PR 작성**: 영문 타이틀 + [`.github/pull_request_template.md`](.github/pull_request_template.md) 규격(Summary, Key Changes, Result, Checklist)에 맞춘 PR 생성(또는 원클릭 링크 및 본문 제공)
+
