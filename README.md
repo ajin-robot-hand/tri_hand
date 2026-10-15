@@ -1,10 +1,10 @@
 # tri_hand: Sim-to-Real 로봇 핸드 제어
 
-손가락 3개와 독립적으로 움직일 수 있는 7개의 관절(7자유도, Degrees of Freedom)을 가진 로봇 손(`tri_hand`)을 컴퓨터 가상 시뮬레이션 환경(Simulation)에서 먼저 검증하고 실제 하드웨어 로봇(Real)에 그대로 적용하는 가상-실물 연계(Sim-to-Real) 제어 소프트웨어 프레임워크입니다.
+손가락 3개와 독립적으로 움직일 수 있는 7개의 관절(7자유도, Degrees of Freedom)을 가진 로봇 손을 컴퓨터 가상 시뮬레이션 환경에서 먼저 검증하고 실제 하드웨어 로봇에 그대로 적용하는 가상-실물 연계(Sim-to-Real) 제어 프로젝트입니다.
 
-MuJoCo 물리 시뮬레이션으로 기구학·동역학 및 제어 로직을 선행 검증(Sim-First)하고, 동일한 HTTP REST API 규격과 웹 대시보드를 통해 실물 로봇(Dynamixel XL430-W250-T 7축)을 제어합니다.
+MuJoCo 물리 시뮬레이션으로 기구학·동역학 및 제어 로직을 선행 검증하고, 동일한 HTTP REST API 규격과 웹 대시보드를 통해 실물 로봇(Dynamixel XL430-W250-T 7축)을 제어합니다.
 
-| MuJoCo 시뮬레이션 (Sim-First) | 실물 로봇 손 (Real Hardware) |
+| MuJoCo 시뮬레이션 (Simulation) | 실물 로봇 손 (Real) |
 | :---: | :---: |
 | <img src="docs/mujoco.gif" alt="tri_hand MuJoCo 시뮬레이션 데모" width="100%"> | <a href="https://youtu.be/c8-295kr47s" target="_blank"><img src="https://img.youtube.com/vi/c8-295kr47s/maxresdefault.jpg" alt="실물 로봇 구동 데모 영상" width="100%"></a><br>[▶️ **YouTube에서 영상 보기**](https://youtu.be/c8-295kr47s) |
 
@@ -54,7 +54,7 @@ flowchart TD
 
 ## 빠른 시작 (가상 시뮬레이션)
 
-> 💡 **실물 하드웨어가 없어도 일반 PC(Windows, Linux, macOS)에서 즉시 실행할 수 있습니다.**
+> 💡 **실물 로봇이 없어도 일반 PC(Windows, Linux, macOS)에서 즉시 실행할 수 있습니다.**
 
 ### 1단계: 환경 구축 (Python 3.10 권장)
 
