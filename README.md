@@ -54,7 +54,7 @@ flowchart TD
 
 ## 빠른 시작 (가상 시뮬레이션)
 
-> 💡 **실물 로봇이 없어도 일반 PC(Windows, Linux, macOS)에서 즉시 실행할 수 있습니다.**
+> 💡 **실물 로봇이 없어도 일반 PC(Windows, Linux, macOS)에서 실행할 수 있습니다.**
 
 ### 1단계: 환경 구축 (Python 3.10 권장)
 
