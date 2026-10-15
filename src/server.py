@@ -30,6 +30,7 @@ import argparse
 import json
 import math
 import os
+import signal
 import threading
 import time
 from collections.abc import Callable
@@ -329,11 +330,31 @@ class Preset(RootModel[dict[str, Motor]]):
 PresetName = PathParam(min_length=1, max_length=40, pattern=r"^[\w-]+(?: [\w-]+)*$")
 
 
+def _normalize_real_gains(p: dict) -> dict:
+    """실물 모터 레지스터 단위의 게인(예: kp=640, kv=3600)이 들어오면 시뮬레이션 기본 물리 단위로 변환."""
+    if not isinstance(p, dict):
+        return p
+    normalized = {}
+    for jn, m in p.items():
+        if isinstance(m, dict):
+            m_copy = dict(m)
+            kp = m_copy.get("kp")
+            kv = m_copy.get("kv")
+            if isinstance(kp, (int, float)) and kp > KP_RANGE[1]:
+                m_copy["kp"] = 12.0
+            if isinstance(kv, (int, float)) and kv > KV_RANGE[1]:
+                m_copy["kv"] = 0.5
+            normalized[jn] = m_copy
+        else:
+            normalized[jn] = m
+    return normalized
+
+
 def _load_presets() -> dict[str, Preset]:
     # exists()로 먼저 확인하지 않음: 접근 거부도 False로 보여 빈 목록으로 오인하기 때문
     try:
         raw = json.loads(PRESETS_PATH.read_text(encoding="utf-8"))
-        return {name: Preset.model_validate(p) for name, p in raw.items()}
+        return {name: Preset.model_validate(_normalize_real_gains(p)) for name, p in raw.items()}
     except FileNotFoundError:
         return {}   # 처음 실행: 아직 저장된 프리셋 없음
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, AttributeError, ValidationError) as e:
@@ -424,6 +445,12 @@ def run_viewer():
 
 
 if __name__ == "__main__":
+    def _shutdown(sig=None, frame=None):
+        os._exit(0)
+
+    signal.signal(signal.SIGINT, _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--headless", action="store_true")
     ap.add_argument("--host", default="127.0.0.1")
@@ -439,3 +466,5 @@ if __name__ == "__main__":
         (run_headless if args.headless else run_viewer)()
     except KeyboardInterrupt:
         pass
+    finally:
+        os._exit(0)
