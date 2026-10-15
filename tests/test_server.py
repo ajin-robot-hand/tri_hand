@@ -98,6 +98,33 @@ def test_update_existing_preset(client):
     assert client.get("/presets").json()["grip"]["A_j1"]["kp"] == 42.0
 
 
+def test_load_real_robot_presets_normalized(client):
+    """실물 모터 레지스터 단위의 게인(kp=640, kv=3600)이 적힌 프리셋도 시뮬레이션 게인으로 자동 보정되어 로드됨."""
+    real_style = {n: {"target": 0.0, "kp": 640, "kv": 3600, "torque_limit": 1.4} for n in JOINTS}
+    server.PRESETS_PATH.write_text(json.dumps({"box": real_style}), encoding="utf-8")
+    loaded = client.get("/presets").json()
+    assert "box" in loaded
+    for n in JOINTS:
+        assert loaded["box"][n]["kp"] == 12.0
+        assert loaded["box"][n]["kv"] == 0.5
+        assert loaded["box"][n]["torque_limit"] == 1.4
+
+
+def test_actual_src_presets_json_valid_and_applicable(client, monkeypatch):
+    """실제 src/presets.json 파일이 정상 로드되고 시뮬레이션에 적용 가능한지 검증."""
+    actual_path = SRC / "presets.json"
+    if actual_path.exists():
+        monkeypatch.setattr(server, "PRESETS_PATH", actual_path)
+        r = client.get("/presets")
+        assert r.status_code == 200
+        presets = r.json()
+        assert len(presets) > 0
+        for name in presets:
+            apply_res = client.post(f"/presets/{name}/apply")
+            assert apply_res.status_code == 200
+
+
+
 @pytest.mark.parametrize("bad", [
     make_preset(A_j0={"target": 1.1}),            # A_j0 범위는 ±1.0472
     make_preset(B_j2={"target": -1.6}),           # 나머지 ±1.5708
