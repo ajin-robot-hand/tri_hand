@@ -174,7 +174,7 @@ tri_hand/
 ## Team & Roles
 
 * **기간**: 2026.08.12 ~ 2026.10.14 (개발 계획서 수립 ~ 최종 성능 평가)
-* **블로그**: 정리되는 대로 기입 
+* **블로그**: [3지 다관절 로봇손의 안정적 물체 파지](https://ajin-robot-hand.github.io/docs/2026/10/tri-hand-basic/#3_1)
 
 | 팀원 | 담당 영역 |
 | :--- | :--- |
@@ -192,6 +192,18 @@ tri_hand/
 * [ROBOTIS Dynamixel SDK](https://github.com/ROBOTIS-GIT/DynamixelSDK) - Dynamixel Protocol 2.0 시리얼 통신 라이브러리
 * [MediaPipe](https://github.com/google/mediapipe) - Google 온디바이스 실시간 손 랜드마크 비전 솔루션
 * [Chart.js](https://www.chartjs.org/) - 웹 대시보드 실시간 각도/토크 시각화 라이브러리
+
+---
+
+## 추가 확장 프로젝트: padak-tri (음악 동기화 안무)
+
+본 프로젝트(`tri_hand`)의 MuJoCo 기구학 모델과 Dynamixel 제어 드라이버를 기반으로, 음악 비트에 맞춰 로봇 손이 춤추는 확장 과제입니다.
+
+* **저장소**: [ajin-robot-hand/padak-tri](https://github.com/ajin-robot-hand/padak-tri)
+
+| 실물 로봇 손 구동 데모 (안무 재생) |
+| :---: |
+| <a href="https://youtu.be/2_KnKuTeGbY" target="_blank"><img src="https://img.youtube.com/vi/2_KnKuTeGbY/maxresdefault.jpg" alt="실물 로봇 손 안무 구동 데모 영상" width="100%"></a><br>[▶️ **YouTube에서 영상 보기**](https://youtu.be/2_KnKuTeGbY) |
 
 ---
 
