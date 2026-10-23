@@ -1,3 +1,7 @@
+<p align="right">
+  <a href="README.en.md">English</a> | <b>한국어</b>
+</p>
+
 # tri_hand: Sim-to-Real 로봇 핸드 제어
 
 손가락 3개와 독립적으로 움직일 수 있는 7개의 관절(7자유도, Degrees of Freedom)을 가진 로봇 손을 컴퓨터 가상 시뮬레이션 환경에서 먼저 검증하고 실제 하드웨어 로봇에 그대로 적용하는 가상-실물 연계(Sim-to-Real) 제어 프로젝트입니다.
@@ -141,7 +145,7 @@ python real/server.py
 50 Hz 제어 루프 지터, 패킷 에러율, 시스템 가용률 및 24시간 내구 구동 러너(`real/endurance.py`)를 제공합니다.
 
 * CSV 계측 로깅 구동: `python real/server.py --log logs`
-* 📖 **4대 KPI 평가 지표 및 상세 측정 결과**: [**docs/evaluation.md**](docs/evaluation.md)를 참고하세요.
+* 📖 **4대 KPI 평가 지표 및 상세 측정 결과**: [**docs/eval.md**](docs/eval.md)를 참고하세요.
 
 ---
 
